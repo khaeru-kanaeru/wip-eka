@@ -1,0 +1,1549 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+<!-- This site is hosted on Netlify. Anyone can build and deploy a site
+     like this one for free: https://netlify.new/?utm_campaign=loops&utm_source=ai-legible&utm_medium=owned&utm_content=comment&utm_id=812fb530-78cd-4741-b9e5-90816ec822b5
+     Netlify hosting facts for this site: static/SSR served via Netlify Edge. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E-WIP MONITORING FIFO & SHORTAGE</title>
+    <link rel="icon" href="assets/ewip.webp" type="image/png">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- SheetJS (Excel Parser) -->
+    <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Chart.js & DataLabels Plugin -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+
+    <!-- HTML2Canvas -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <!-- FIREBASE SDK (Compat Version for Easy Integration) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'Plus Jakarta Sans', 'Segoe UI', 'sans-serif'],
+                        display: ['Plus Jakarta Sans', 'Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'ui-monospace', 'monospace']
+                    },
+                    colors: {
+                        brand: {
+                            50: '#352212',
+                            100: '#4a3018',
+                            200: '#6e4921',
+                            300: '#b3832b',
+                            400: '#d4a843',
+                            500: '#d4a843',
+                            600: '#e8c468',
+                            700: '#f5dc96',
+                            800: '#faecc2',
+                            900: '#fff6dc'
+                        },
+                        sogan: {
+                            950: '#0f0804',
+                            900: '#160c06',
+                            850: '#1d1109',
+                            800: '#25160c',
+                            700: '#331f11',
+                            600: '#452b18',
+                            500: '#5d3b22'
+                        },
+                        bento: { bg: '#1d1109', border: 'rgba(212,168,67,0.34)' }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Separated Pure CSS Architecture (No Frameworks) -->
+    <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/themes.css">
+</head>
+<body class="ewip-app flex flex-col h-screen overflow-hidden font-sans text-sm relative" data-theme="royal-batik" data-theme-mode="dark">
+
+    <!-- Shared SVG Gradient Defs for Traditional Gunungan Crests -->
+    <svg class="hidden" width="0" height="0" aria-hidden="true">
+        <defs>
+            <linearGradient id="batikGoldMetal" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#fff4c4"/>
+                <stop offset="45%" stop-color="#e8be59"/>
+                <stop offset="100%" stop-color="#9e6d1c"/>
+            </linearGradient>
+        </defs>
+    </svg>
+
+    <div id="toast-container"></div>
+
+    <!-- Floating Multi-Theme Switcher Popover -->
+    <div id="theme-picker-popover" class="hidden" role="dialog" aria-label="Pilih Tema Tampilan">
+        <div class="px-4 py-3 flex items-center justify-between border-b" style="background: var(--surface-2); border-color: var(--border-subtle);">
+            <div class="flex items-center gap-2">
+                <i data-lucide="palette" class="w-4 h-4 ewip-accent-icon"></i>
+                <div>
+                    <h3 class="font-batik-display font-extrabold text-xs tracking-wide ewip-panel-title leading-none">Pilih Tema Tampilan</h3>
+                    <p class="text-[10px] ewip-panel-sub mt-0.5">Tersimpan otomatis di browser Anda</p>
+                </div>
+            </div>
+            <button type="button" onclick="window.toggleThemePopover(event)" class="p-1 rounded-md ewip-nav-icon-btn transition" title="Tutup">
+                <i data-lucide="x" class="w-3.5 h-3.5"></i>
+            </button>
+        </div>
+        <div id="theme-picker-list" class="p-2.5 flex flex-col gap-1.5 max-h-[75vh] overflow-y-auto"></div>
+    </div>
+
+    <!-- AUTH PIN MODAL -->
+    <div id="auth-modal" class="fixed inset-0 bg-gray-900/80 z-[10005] hidden flex items-center justify-center p-4 backdrop-blur-sm transition-opacity">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xs overflow-hidden border border-gray-200">
+            <div class="px-5 py-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
+                <h3 class="font-black text-gray-800 flex items-center gap-2"><i data-lucide="lock" class="w-5 h-5 text-brand-500"></i> Otorisasi Akses</h3>
+                <button onclick="closeAuthModal()" class="text-gray-400 hover:text-red-500 transition p-1 rounded-md hover:bg-white border border-transparent hover:border-gray-200"><i data-lucide="x" class="w-4 h-4"></i></button>
+            </div>
+            <div class="p-6 flex flex-col gap-4 text-center bg-white">
+                <p class="text-[10px] text-gray-500 font-bold">Masukkan PIN Verifikasi / User ID untuk mengelola data pada menu ini.</p>
+                <input type="password" id="auth-pin-input" placeholder="••••••" onkeydown="if(event.key === 'Enter') submitAuth()" class="w-full text-center text-2xl tracking-[0.5em] font-black border border-gray-300 px-3 py-3 rounded-xl focus:border-brand-500 focus:ring-2 focus:ring-brand-200 outline-none text-gray-800 bg-gray-50 shadow-inner">
+            </div>
+            <div class="p-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-2">
+                <button onclick="closeAuthModal()" class="px-4 py-2 rounded-lg text-xs font-bold text-gray-500 hover:bg-gray-200 transition">Batal</button>
+                <button onclick="submitAuth()" class="bg-brand-500 hover:bg-brand-600 text-white px-6 py-2 rounded-lg shadow-md text-xs font-bold flex items-center gap-2 transition"><i data-lucide="unlock" class="w-4 h-4"></i> Validasi</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Screen Overlay (Theme-Aware Splash) -->
+    <div id="loading-overlay" class="fixed inset-0 z-[99999] flex flex-col justify-between transition-opacity duration-500">
+        
+        <!-- Center Flex Wrapper (Docked Left & Right) -->
+        <div class="flex-1 flex flex-col md:flex-row items-center justify-between w-full px-8 md:px-16 lg:px-24 xl:px-32 gap-16">
+            
+            <!-- Left: Gunungan Crest (Batik themes), Logos & Titles -->
+            <div class="flex flex-col items-start gap-4 shrink-0">
+                <div class="flex items-center gap-3 mb-2">
+                    <svg class="ewip-batik-crest w-12 h-14 shrink-0 drop-shadow-[0_0_12px_rgba(244,212,124,0.45)]" viewBox="0 0 64 76" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M32 3 C43 18 57 34 55 56 C54 64 46 69 32 71 C18 69 10 64 9 56 C7 34 21 18 32 3 Z" fill="#23140a" stroke="url(#batikGoldMetal)" stroke-width="2.2"/>
+                        <path d="M32 10 C40 22 49 35 48 53 C47 60 41 64 32 65 C23 64 17 60 16 53 C15 35 24 22 32 10 Z" fill="none" stroke="#d4a843" stroke-width="1" stroke-dasharray="2 2"/>
+                        <path d="M32 18 L32 62 M32 32 C24 30 21 38 26 42 M32 32 C40 30 43 38 38 42 M32 45 C23 43 19 52 25 56 M32 45 C41 43 45 52 39 56" stroke="#f4d47c" stroke-width="1.5" stroke-linecap="round"/>
+                        <circle cx="32" cy="24" r="2.8" fill="#fff2bf"/>
+                        <circle cx="32" cy="54" r="2.4" fill="#d4a843"/>
+                    </svg>
+                    <img src="assets/banshu-logo.webp" alt="Logo 1" onerror="this.style.display='none'" class="h-12 w-auto object-contain drop-shadow-md">
+                    <img src="assets/kinenta.webp" alt="Logo 2" onerror="this.style.display='none'" class="h-12 w-auto object-contain drop-shadow-md">
+                    <img src="assets/ewip.webp" alt="Logo 3" onerror="this.style.display='none'" class="h-12 w-auto object-contain drop-shadow-md">
+                </div>
+                <h1 class="font-batik-display text-4xl md:text-5xl lg:text-6xl font-black leading-[1.12] tracking-wide drop-shadow-lg">
+                    <span class="ewip-loading-accent">E-WIP</span><br>
+                    <span class="text-white">MONITORING FIFO</span><br>
+                    <span class="ewip-loading-accent opacity-90">&amp; SHORTAGE</span>
+                </h1>
+            </div>
+
+            <!-- Right: Random Notes & Skeleton (Dock to Right) -->
+            <div class="ewip-loading-card max-w-lg w-full shrink-0 md:pl-10 p-6 rounded-xl shadow-2xl">
+                <h3 class="font-batik-display ewip-loading-accent font-bold mb-3 text-base tracking-widest uppercase">Catatan Produksi:</h3>
+                
+                <!-- Skeleton Mode (Tampil Awal) -->
+                <div id="loading-notes-skeleton" class="flex flex-col gap-2.5 animate-pulse">
+                    <div class="h-3 bg-white/15 rounded w-full"></div>
+                    <div class="h-3 bg-white/15 rounded w-[90%]"></div>
+                    <div class="h-3 bg-white/15 rounded w-[95%]"></div>
+                    <div class="h-3 bg-white/15 rounded w-[70%]"></div>
+                </div>
+
+                <!-- Actual Notes Text -->
+                <div id="loading-notes-text" class="text-white/90 text-sm md:text-base leading-relaxed text-justify hidden font-medium tracking-wide">
+                    Mempersiapkan lingkungan Cloud...
+                </div>
+            </div>
+            
+        </div>
+
+        <!-- Bottom: Progress Bar Area -->
+        <div class="w-full px-8 md:px-16 pb-10 pt-4 flex flex-col gap-2 relative">
+            <div class="flex flex-col mb-1 drop-shadow-md">
+                <span id="loading-title" class="font-batik-display ewip-loading-accent font-bold text-sm tracking-wider">Inisialisasi Sistem...</span>
+                <span id="loading-rows" class="ewip-loading-sub text-[10px] uppercase font-bold tracking-widest mt-0.5">Memuat UI...</span>
+            </div>
+            
+            <!-- Thin Shining Progress Bar -->
+            <div class="ewip-loading-track relative w-full h-[4px] rounded-full mt-2 border">
+                <div id="loading-bar" class="absolute top-0 left-0 h-full rounded-full w-0 progress-bar-fill overflow-hidden">
+                    <div class="absolute inset-0 w-full h-full animate-shine"></div>
+                </div>
+                
+                <!-- Percentage Badge (Mengikuti Ujung) -->
+                <div id="loading-badge" class="absolute top-[-28px] -ml-4 text-[9px] font-black font-mono px-2 py-0.5 rounded shadow-lg transition-all duration-300 transform -translate-x-1/2 border" style="left: 0%;">
+                    0%
+                </div>
+            </div>
+        </div>
+        
+    </div>
+
+    <!-- Drilldown Modal (List Assy Chart Click) -->
+    <div id="drilldown-modal" class="fixed inset-0 bg-gray-900/80 z-[9999] hidden flex flex-col items-center justify-center p-4 lg:p-10 backdrop-blur-sm transition-opacity">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-5xl h-full max-h-[90vh] flex flex-col overflow-hidden border border-gray-200">
+            <div class="px-5 py-4 border-b border-gray-200 flex justify-between items-center bg-gray-50 shrink-0">
+                <div class="flex items-center gap-3">
+                    <div class="bg-brand-500 text-white p-2 rounded-lg"><i data-lucide="list" class="w-5 h-5"></i></div>
+                    <div>
+                        <h3 id="drilldown-title" class="font-bold text-lg text-gray-800 tracking-tight leading-none">List Assy WPP</h3>
+                        <span id="drilldown-subtitle" class="text-xs text-brand-600 font-bold bg-brand-50 px-2 py-0.5 rounded mt-1 inline-block">Detailed View</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="exportDrilldownXLSX()" class="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-md text-[10px] font-bold shadow transition"><i data-lucide="download" class="w-3.5 h-3.5"></i> Export Excel</button>
+                    <button onclick="closeDrilldown()" class="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+                </div>
+            </div>
+            <div class="flex-1 overflow-auto p-0 bg-white">
+                <table class="excel-table w-full whitespace-nowrap" id="drilldown-table-export">
+                    <thead class="sticky top-0 shadow-sm z-10 bg-white" id="drilldown-thead">
+                        <!-- JS Rendered -->
+                    </thead>
+                    <tbody id="drilldown-tbody" class="divide-y divide-gray-100"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- STWC Setting Modal -->
+    <div id="stwc-modal" class="fixed inset-0 bg-gray-900/80 z-[9999] hidden flex flex-col items-center justify-center p-4 backdrop-blur-sm transition-opacity">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden border border-gray-200">
+            <div class="px-5 py-4 border-b border-gray-200 flex justify-between items-center bg-indigo-50 shrink-0">
+                <div class="flex items-center gap-3">
+                    <div class="bg-indigo-600 text-white p-2 rounded-lg"><i data-lucide="calendar-clock" class="w-5 h-5"></i></div>
+                    <div>
+                        <h3 class="font-bold text-lg text-indigo-900 tracking-tight leading-none">Setting STWC Controller</h3>
+                        <span class="text-[10px] text-indigo-600 font-medium mt-1 inline-block">Konfigurasi ini akan memaksa penimpaan tanggal seluruh Database.</span>
+                    </div>
+                </div>
+                <button onclick="closeStwcModal()" class="p-2 text-indigo-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            <div class="flex-1 overflow-auto p-4 bg-gray-50/50">
+                <table class="w-full bg-white border border-gray-200 rounded-lg shadow-sm text-xs whitespace-nowrap">
+                    <thead class="bg-gray-100 border-b border-gray-200 sticky top-0 z-10 shadow-sm">
+                        <tr>
+                            <th class="p-3 text-left text-gray-600 font-bold uppercase tracking-wider text-[10px]">Periode</th>
+                            <th class="p-3 text-center text-gray-600 font-bold uppercase tracking-wider text-[10px]">WPP</th>
+                            <th class="p-3 text-right text-gray-600 font-bold uppercase tracking-wider text-[10px]">Tanggal STWC (Mutlak)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="stwc-tbody" class="divide-y divide-gray-100"></tbody>
+                </table>
+            </div>
+            <div class="p-4 border-t border-gray-200 bg-white flex justify-between items-center shrink-0">
+                <span class="text-[10px] text-gray-500 font-medium"><i data-lucide="info" class="w-3 h-3 inline"></i> Kosongkan field jika ingin menghapus pengaturan untuk WPP tersebut.</span>
+                <button onclick="saveStwcSettings()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-lg shadow transition flex items-center gap-2"><i data-lucide="save" class="w-4 h-4"></i> Simpan & Terapkan</button>
+            </div>
+        </div>
+    </div>
+   
+    <!-- Navbar (Multi-Theme Adaptive Header) -->
+    <nav class="ewip-navbar relative px-4 py-2.5 flex items-center justify-between z-20 shrink-0 overflow-hidden gap-3">
+        <div class="flex items-center gap-3 relative z-10 shrink-0">
+            <div class="flex items-center gap-2">
+                <!-- Brand Emblem & Optional Batik Gunungan Crest -->
+                <div class="ewip-brand-box flex items-center gap-1.5 shrink-0 px-2 py-1 rounded-lg shadow-inner">
+                    <svg class="ewip-batik-crest w-5 h-6 shrink-0" viewBox="0 0 64 76" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path d="M32 3 C43 18 57 34 55 56 C54 64 46 69 32 71 C18 69 10 64 9 56 C7 34 21 18 32 3 Z" fill="#2a170b" stroke="url(#batikGoldMetal)" stroke-width="3"/>
+                        <path d="M32 16 L32 62 M32 31 C24 29 21 38 26 42 M32 31 C40 29 43 38 38 42 M32 45 C23 44 20 53 26 56 M32 45 C41 44 44 53 38 56" stroke="#f4d47c" stroke-width="2.2" stroke-linecap="round"/>
+                        <circle cx="32" cy="22" r="3" fill="#fff2bf"/>
+                    </svg>
+                    <img src="assets/banshu-logo.webp" alt="Logo 1" onerror="this.style.display='none'" class="h-5 w-auto object-contain">
+                    <img src="assets/kinenta.webp" alt="Logo 2" onerror="this.style.display='none'" class="h-5 w-auto object-contain">
+                    <img src="assets/ewip.webp" alt="Logo 3" onerror="this.style.display='none'" class="h-5 w-auto object-contain">
+                </div>
+                <div class="ewip-brand-divider border-l pl-2.5 flex flex-col justify-center">
+                    <h1 class="font-batik-display font-black text-base leading-none tracking-wider ewip-brand-title">E-WIP</h1>
+                    <span class="text-[8px] ewip-brand-sub font-bold uppercase tracking-[0.14em] leading-none mt-1">Monitoring FIFO &amp; Shortage</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="ewip-nav-pill-bar flex items-center gap-1 p-1 rounded-xl shadow-inner relative z-10 overflow-x-auto scrollbar-hide" id="nav-center-menus">
+            <button onclick="openChatModal()" class="ewip-nav-icon-btn relative px-2.5 py-1.5 rounded-md text-xs font-semibold transition flex items-center gap-1.5 shadow-sm whitespace-nowrap shrink-0" title="Forum & Chat">
+                <i data-lucide="message-square" class="w-3.5 h-3.5"></i>
+                <span id="chat-badge" class="hidden absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[8px] font-bold text-white shadow-sm border border-white/70 animate-pulse">0</span>
+            </button>
+            
+            <div class="w-px h-5 mx-1 shrink-0" style="background: var(--border-subtle);"></div>
+            <button id="btn-tab-overview" onclick="switchTab('overview')" class="px-3 py-1.5 rounded-md text-xs font-semibold transition whitespace-nowrap shrink-0">Overview</button>
+            <button id="btn-tab-report" onclick="switchTab('report')" class="px-3 py-1.5 rounded-md text-xs font-semibold transition whitespace-nowrap shrink-0">Resume Analisis</button>
+            <button id="btn-tab-control" onclick="switchTab('control')" class="px-3 py-1.5 rounded-md text-xs font-semibold transition flex items-center gap-1 whitespace-nowrap shrink-0">Database Bersih</button>
+            <button id="btn-tab-sh" onclick="switchTab('sh')" class="px-3 py-1.5 rounded-md text-xs font-semibold transition whitespace-nowrap shrink-0">SH Material</button>
+            <button id="btn-tab-paylater" onclick="switchTab('paylater')" class="px-3 py-1.5 rounded-md text-xs font-semibold transition flex items-center gap-1 whitespace-nowrap shrink-0">Assy Paylater</button>
+            <button id="btn-tab-rocket" onclick="switchTab('rocket')" class="px-3 py-1.5 rounded-md text-xs font-semibold transition flex items-center gap-1 whitespace-nowrap shrink-0">Assy Rocket</button>
+        </div>
+
+        <div class="flex items-center gap-2 relative z-10 shrink-0">
+            <button id="btn-tab-master" onclick="requireAccess(['111111'], () => switchTab('master'))" class="px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1.5 shadow-sm whitespace-nowrap shrink-0">
+                <i data-lucide="lock" class="w-3.5 h-3.5"></i> Master Data (MPP)
+            </button>
+            <button id="btn-tab-input" onclick="requireAccess(['110603', '111111'], () => switchTab('input'))" class="px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1.5 shadow-md whitespace-nowrap shrink-0">
+                <i data-lucide="upload-cloud" class="w-3.5 h-3.5"></i> WIP Input (Harian)
+            </button>
+            <button id="btn-theme-switcher" type="button" onclick="window.toggleThemePopover(event)" class="ewip-nav-icon-btn w-8 h-8 rounded-md transition flex items-center justify-center shadow-sm shrink-0" title="Ganti Tema Tampilan" aria-label="Ganti Tema Tampilan">
+                <i data-lucide="palette" class="w-4 h-4"></i>
+            </button>
+        </div>
+    </nav>
+
+    <!-- Global Threshold Control -->
+    <div class="px-4 py-2 flex flex-col md:flex-row justify-between items-center shrink-0 gap-2" id="global-threshold-bar">
+        <div class="flex items-center gap-2">
+            <i data-lucide="target" class="w-4 h-4 ewip-accent-icon"></i>
+            <span class="font-batik-display text-[11px] font-bold ewip-threshold-title uppercase tracking-[0.12em]">Global Threshold Control</span>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+            <div id="greet-control" class="mr-2"></div>
+            <div class="ewip-threshold-chip flex items-center gap-1.5 px-2.5 py-1 rounded-md shadow-inner">
+                <span class="text-[9px] font-bold ewip-threshold-label uppercase">1. Cut-Off (Abaikan WPP Lama):</span>
+                <select id="cutoff-wpp-select" onchange="attemptUpdateCutoff(this)" class="ewip-threshold-select-cutoff text-[10px] font-bold font-mono outline-none bg-transparent cursor-pointer border-none"></select>
+            </div>
+            <div class="ewip-threshold-chip flex items-center gap-1.5 px-2.5 py-1 rounded-md shadow-inner">
+                <span class="text-[9px] font-bold ewip-threshold-label uppercase">2. Batas Outstanding (Delay):</span>
+                <select id="delay-wpp-select" onchange="attemptUpdateDelay(this)" class="ewip-threshold-select-delay text-[10px] font-bold font-mono outline-none bg-transparent cursor-pointer border-none"></select>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN SCROLL AREA -->
+    <main class="flex-1 overflow-auto p-3 flex flex-col gap-4 bg-transparent" id="main-scroll-area">
+        
+        <!-- ================= OVERVIEW VIEW (DASHBOARD) ================= -->
+        <section id="view-overview" class="hidden w-full flex flex-col gap-4 pb-10">
+            <!-- OVERVIEW EXPORT WRAPPER -->
+            <div id="view-overview-export-wrapper" class="w-full flex flex-col gap-4 bg-transparent p-2 rounded-xl">
+                
+                <!-- Category Context Filters & Overview Sub-Menu -->
+                <div class="bento-box flex flex-col lg:flex-row justify-between items-stretch lg:items-center px-4 py-3 shrink-0 gap-3" id="overview-export-buttons-hide">
+                    <div class="flex flex-wrap items-center gap-3 min-w-0">
+                        <div class="ewip-subtab-bar shrink-0" role="tablist" aria-label="Menu Overview">
+                            <button id="btn-ov-sub-summary" type="button" onclick="setOverviewSubTab('summary')" class="px-3 py-1.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider transition flex items-center gap-1.5 whitespace-nowrap">
+                                <i data-lucide="layout-dashboard" class="w-3.5 h-3.5"></i> Ringkasan WIP
+                            </button>
+                            <button id="btn-ov-sub-trend" type="button" onclick="setOverviewSubTab('trend-daily')" class="px-3 py-1.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider transition flex items-center gap-1.5 whitespace-nowrap">
+                                <i data-lucide="calendar-range" class="w-3.5 h-3.5"></i> Trend FIFO Daily
+                            </button>
+                        </div>
+                        <div class="hidden xl:block w-px h-5 shrink-0" style="background: var(--border-subtle);"></div>
+                        <div class="flex gap-2.5 items-center overflow-x-auto scrollbar-hide min-w-0">
+                            <span class="font-batik-display text-[10px] font-bold ewip-accent-text uppercase tracking-widest flex items-center gap-1.5 shrink-0"><i data-lucide="filter" class="w-3.5 h-3.5 ewip-accent-icon"></i> KATEGORI:</span>
+                            <div class="ewip-cat-bar flex gap-1.5 p-1 rounded-lg border" id="overview-cat-buttons"></div>
+                        </div>
+                    </div>
+                    <button onclick="downloadOverviewImage()" class="ewip-btn-primary shrink-0 flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-md text-[10px] font-extrabold shadow-md transition whitespace-nowrap"><i data-lucide="camera" class="w-3.5 h-3.5"></i> Export Dashboard</button>
+                </div>
+
+                <!-- OVERVIEW SUB-VIEW 1: RINGKASAN WIP -->
+                <div id="overview-panel-summary" class="flex flex-col gap-4">
+
+                <!-- ALERT NOTIFICATION WPP MISSING STWC -->
+                <div id="overview-stwc-alert" class="hidden bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl shadow-sm flex justify-between items-center cursor-pointer hover:bg-red-100 transition" onclick="openStwcModal()">
+                    <div class="flex items-center gap-3">
+                        <i data-lucide="alert-triangle" class="w-5 h-5 text-red-500 animate-pulse"></i>
+                        <div>
+                            <h4 class="font-batik-display text-xs font-black uppercase tracking-wider text-red-700">Peringatan STWC Belum Ditetapkan!</h4>
+                            <p class="text-[10px] font-medium mt-0.5 text-red-600" id="overview-stwc-alert-text">Terdapat WPP baru yang belum memiliki tanggal STWC.</p>
+                        </div>
+                    </div>
+                    <span class="text-[10px] font-bold bg-red-600 px-2.5 py-1 rounded text-white whitespace-nowrap shadow-sm">Atur Sekarang &rarr;</span>
+                </div>
+
+                
+                <!-- KPI CARDS (THEME-ADAPTIVE TILES) -->
+                <div class="grid grid-cols-1 md:grid-cols-5 gap-3 shrink-0">
+                    <div class="bento-box ewip-kpi-hero p-4 relative overflow-hidden cursor-pointer hover:scale-[1.015] transition-transform" onclick="openAdvancedDrilldown('TOP_KPI', 'ALL')">
+                        <div class="ewip-upload-strip absolute top-0 left-0 right-0"></div>
+                        <i data-lucide="layers" class="w-20 h-20 absolute -right-4 -bottom-4 ewip-kpi-ghost"></i>
+                        <h3 class="font-batik-display text-[10px] font-bold uppercase tracking-widest ewip-kpi-label mb-1">Total List Assy</h3>
+                        <div id="ov-master-total" class="font-mono tabular-nums text-3xl font-black ewip-kpi-val">0</div>
+                        <p class="text-[9px] ewip-kpi-sub mt-1">Database Valid (Atas Cut-Off)</p>
+                    </div>
+                    <div class="bento-box ewip-kpi-tile p-4 relative overflow-hidden cursor-pointer hover:scale-[1.015] transition-transform" onclick="openAdvancedDrilldown('TOP_KPI', 'CND 1')">
+                        <div class="absolute top-0 left-0 right-0 h-[2.5px] bg-gradient-to-r from-transparent via-amber-400 to-transparent opacity-80"></div>
+                        <div class="flex justify-between items-start mb-1">
+                            <h3 class="font-batik-display text-[10px] font-bold uppercase tracking-widest ewip-kpi-label-onsched">On Schedule (CND 1)</h3>
+                            <i data-lucide="clock" class="w-4 h-4 ewip-kpi-label-onsched opacity-85"></i>
+                        </div>
+                        <div id="ov-master-onsched" class="font-mono tabular-nums text-3xl font-black ewip-kpi-val-onsched tracking-tight">0</div>
+                        <p class="text-[9px] ewip-kpi-sub mt-1">Sesuai rentang STWC (Aman)</p>
+                    </div>
+                    <div class="bento-box ewip-kpi-tile p-4 relative overflow-hidden cursor-pointer hover:scale-[1.015] transition-transform" onclick="openAdvancedDrilldown('TOP_KPI', 'CND 2')">
+                        <div class="absolute top-0 left-0 right-0 h-[2.5px] bg-gradient-to-r from-transparent via-amber-500 to-transparent opacity-80"></div>
+                        <div class="flex justify-between items-start mb-1">
+                            <h3 class="font-batik-display text-[10px] font-bold uppercase tracking-widest ewip-kpi-label-cnd2">Warning (CND 2)</h3>
+                            <i data-lucide="alert-triangle" class="w-4 h-4 ewip-kpi-label-cnd2 opacity-85"></i>
+                        </div>
+                        <div id="ov-master-cnd2" class="font-mono tabular-nums text-3xl font-black ewip-kpi-val-cnd2 tracking-tight">0</div>
+                        <p class="text-[9px] ewip-kpi-sub mt-1">STWC terlewat H+1 Hari</p>
+                    </div>
+                    <div class="bento-box ewip-kpi-tile p-4 relative overflow-hidden cursor-pointer hover:scale-[1.015] transition-transform" onclick="openAdvancedDrilldown('TOP_KPI', 'CND 3')">
+                        <div class="absolute top-0 left-0 right-0 h-[2.5px] bg-gradient-to-r from-transparent via-red-500 to-transparent opacity-80"></div>
+                        <div class="flex justify-between items-start mb-1">
+                            <h3 class="font-batik-display text-[10px] font-bold uppercase tracking-widest ewip-kpi-label-cnd3">Overdue (CND 3)</h3>
+                            <i data-lucide="alert-octagon" class="w-4 h-4 ewip-kpi-label-cnd3 opacity-85"></i>
+                        </div>
+                        <div id="ov-master-cnd3" class="font-mono tabular-nums text-3xl font-black ewip-kpi-val-cnd3 tracking-tight">0</div>
+                        <p class="text-[9px] ewip-kpi-sub mt-1">STWC terlewat ≥ H+2 Hari</p>
+                    </div>
+                    <div class="bento-box ewip-kpi-tile p-4 relative overflow-hidden cursor-pointer hover:scale-[1.015] transition-transform" onclick="openAdvancedDrilldown('TOP_KPI', 'CLOSED')">
+                        <div class="absolute top-0 left-0 right-0 h-[2.5px] bg-gradient-to-r from-transparent via-emerald-500 to-transparent opacity-80"></div>
+                        <div class="flex justify-between items-start mb-1">
+                            <h3 class="font-batik-display text-[10px] font-bold uppercase tracking-widest ewip-kpi-label-closed">Closed (Finish)</h3>
+                            <i data-lucide="check-circle" class="w-4 h-4 ewip-kpi-label-closed opacity-85"></i>
+                        </div>
+                        <div id="ov-master-closed" class="font-mono tabular-nums text-3xl font-black ewip-kpi-val-closed tracking-tight">0</div>
+                        <p class="text-[9px] ewip-kpi-sub mt-1">Tuntas / Hilang dari WIP</p>
+                    </div>
+                </div>
+
+                <!-- LISTS & TREND LINE -->
+                <div class="grid grid-cols-1 lg:grid-cols-5 gap-4 shrink-0">
+                    <!-- Overdue List -->
+                    <div class="bento-box flex flex-col h-[320px] overflow-hidden">
+                        <div class="ewip-head-overdue px-4 py-3 border-b flex flex-col gap-2 shrink-0">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-1.5"><i data-lucide="alert-octagon" class="w-4 h-4 ewip-kpi-label-cnd3"></i><h2 class="font-batik-display font-bold ewip-panel-title text-xs tracking-wide">Warning &amp; Overdue</h2></div>
+                                <div class="flex items-center gap-2">
+                                    <button onclick="exportOverdueToExcel()" class="ewip-mini-export-red text-[9px] px-2 py-0.5 rounded border shadow-sm transition flex items-center gap-1 hover:brightness-110" title="Export List Ini"><i data-lucide="download" class="w-3 h-3"></i></button>
+                                    <span id="ov-overdue-list-count" class="ewip-badge-overdue font-mono tabular-nums text-[10px] font-bold border px-2 py-0.5 rounded-full">0</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-1 overflow-x-auto scrollbar-hide" id="overdue-wp-filters"></div>
+                        </div>
+                        <div id="overview-overdue-list" class="flex-1 overflow-auto flex flex-col gap-1.5 p-3"></div>
+                    </div>
+
+                    <!-- Closed List -->
+                    <div class="bento-box flex flex-col h-[320px] overflow-hidden">
+                        <div class="ewip-head-closed px-4 py-3 border-b flex flex-col gap-2 shrink-0">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-1.5"><i data-lucide="party-popper" class="w-4 h-4 ewip-kpi-label-closed"></i><h2 class="font-batik-display font-bold ewip-panel-title text-xs tracking-wide">Closed Hari Ini</h2></div>
+                                <div class="flex items-center gap-2">
+                                    <button onclick="exportClosedTodayToExcel()" class="ewip-mini-export-green text-[9px] px-2 py-0.5 rounded border shadow-sm transition flex items-center gap-1 hover:brightness-110" title="Export List Ini"><i data-lucide="download" class="w-3 h-3"></i></button>
+                                    <span id="ov-closed-today-count" class="ewip-badge-closed font-mono tabular-nums text-[10px] font-bold border px-2 py-0.5 rounded-full">0</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-1 overflow-x-auto scrollbar-hide" id="closed-wp-filters"></div>
+                        </div>
+                        <div id="overview-closed-list" class="flex-1 overflow-auto flex flex-col gap-1.5 p-3"></div>
+                    </div>
+
+                    <!-- Health Trend -->
+                    <div class="bento-box p-5 flex flex-col h-[320px] lg:col-span-2">
+                        <div class="mb-3 shrink-0 flex justify-between items-start gap-2">
+                            <div>
+                                <h2 class="font-batik-display font-bold ewip-panel-title text-sm flex items-center gap-1.5 tracking-wide"><i data-lucide="trending-up" class="w-4 h-4 ewip-accent-icon"></i> Tren Kesehatan WIP (% On-Sched - <span id="daily-trend-title-cat" class="ewip-accent-text font-black tracking-widest">ALL</span>)</h2>
+                                <p class="text-[10px] ewip-panel-sub mt-1">Kalkulasi % On Schedule berbanding Total Load Aktif berdasar riwayat.</p>
+                            </div>
+                            <div class="flex items-center gap-1.5 shrink-0">
+                                <select id="trend-month-filter" onchange="renderOverviewDashboard()" class="ewip-trend-select px-2.5 py-1.5 rounded border text-[9px] font-bold outline-none cursor-pointer shadow-sm uppercase tracking-wider">
+                                    <option value="ALL">SEMUA WAKTU</option>
+                                </select>
+                                <button type="button" onclick="setOverviewSubTab('trend-daily')" class="ewip-btn-secondary px-2.5 py-1.5 rounded text-[9px] font-bold transition flex items-center gap-1 whitespace-nowrap shadow-sm" title="Buka Detail Trend FIFO Daily &amp; Rekap Tabel Per-Tanggal">
+                                    <span>Detail Harian</span>
+                                    <i data-lucide="arrow-right" class="w-3 h-3"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="flex-1 relative w-full min-w-0"><canvas id="chartDailyTrend"></canvas></div>
+                    </div>
+
+                    <!-- SH History Overview -->
+                    <div class="bento-box flex flex-col h-[320px] overflow-hidden">
+                        <div class="ewip-head-sh px-4 py-3 border-b flex flex-col gap-2 shrink-0">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-1.5"><i data-lucide="box" class="w-4 h-4 ewip-accent-icon"></i><h2 class="font-batik-display font-bold ewip-panel-title text-xs tracking-wide">Riwayat SH</h2></div>
+                                <span id="ov-sh-list-count" class="ewip-badge-sh font-mono tabular-nums text-[10px] font-bold border px-2 py-0.5 rounded-full" title="Total SH Aktif (Belum Datang)">0</span>
+                            </div>
+                            <span class="text-[9px] ewip-panel-sub font-medium">Tracking Material Shortage</span>
+                        </div>
+                        <div id="overview-sh-list" class="flex-1 overflow-auto flex flex-col gap-1.5 p-3"></div>
+                    </div>
+                </div>
+
+                <!-- LOADING ANALYSIS HEADER -->
+                <div class="bento-box p-5 flex flex-col w-full mt-2">
+                    <div class="ewip-section-divider flex justify-between items-center w-full mb-3 shrink-0 border-b pb-3">
+                        <div>
+                            <h2 class="font-batik-display font-bold ewip-accent-text text-lg flex items-center gap-2 tracking-wide"><i data-lucide="activity" class="w-5 h-5 ewip-accent-icon"></i> Analisis Loading &amp; Outstanding</h2>
+                            <p class="text-[11px] ewip-panel-sub mt-1">Area berarsir merah pada grafik menandai batas Outstanding (Delay).</p>
+                        </div>
+                        <button onclick="copyReportText()" class="ewip-btn-secondary px-3.5 py-1.5 rounded-md text-[10px] font-bold shadow transition flex items-center gap-1.5 shrink-0 hover:-translate-y-0.5 whitespace-nowrap"><i data-lucide="copy" class="w-3.5 h-3.5"></i> Copy Report Text</button>
+                    </div>
+
+                    <div class="flex flex-wrap lg:flex-nowrap gap-3.5 mb-2 shrink-0">
+                        <div class="ewip-mid-kpi-load flex-1 flex flex-col border px-5 py-3 rounded-xl shadow-inner cursor-pointer hover:scale-[1.015] transition" onclick="openAdvancedDrilldown('MID_KPI', 'ALL')">
+                            <span class="ewip-mid-label text-[10px] font-bold uppercase tracking-wider mb-1">Total Load Aktif</span>
+                            <span id="ov-kpi-load" class="ewip-mid-val font-mono tabular-nums text-3xl font-black">0</span>
+                        </div>
+                        <div class="ewip-mid-kpi-onsched flex-1 flex flex-col border px-5 py-3 rounded-xl shadow-inner cursor-pointer hover:scale-[1.015] transition" onclick="openAdvancedDrilldown('MID_KPI', 'ONSCHED')">
+                            <span class="ewip-mid-label text-[10px] font-bold uppercase tracking-wider mb-1">On Schedule</span>
+                            <span id="ov-kpi-onsched" class="ewip-mid-val font-mono tabular-nums text-3xl font-black">0</span>
+                        </div>
+                        <div class="ewip-mid-kpi-delay flex-1 flex flex-col border px-5 py-3 rounded-xl shadow-inner cursor-pointer hover:scale-[1.015] transition" onclick="openAdvancedDrilldown('MID_KPI', 'DELAY')">
+                            <span class="ewip-mid-label text-[10px] font-bold uppercase tracking-wider mb-1">Total Delay</span>
+                            <span id="ov-kpi-delay" class="ewip-mid-val font-mono tabular-nums text-3xl font-black">0</span>
+                        </div>
+                        <div class="ewip-mid-kpi-sh flex-1 flex flex-col border px-5 py-3 rounded-xl shadow-inner cursor-pointer hover:scale-[1.015] transition" onclick="openAdvancedDrilldown('MID_KPI', 'SH')">
+                            <span class="ewip-mid-label text-[10px] font-bold uppercase tracking-wider mb-1">Shortage (SH)</span>
+                            <span id="ov-kpi-sh" class="ewip-mid-val font-mono tabular-nums text-3xl font-black">0</span>
+                        </div>
+                        <div class="ewip-mid-kpi-paylater flex-1 flex flex-col border px-5 py-3 rounded-xl shadow-inner cursor-pointer hover:scale-[1.015] transition" onclick="openAdvancedDrilldown('MID_KPI', 'PAYLATER')">
+                            <span class="ewip-mid-label text-[10px] font-bold uppercase tracking-wider mb-1">Paylater (Py)</span>
+                            <span id="ov-kpi-paylater" class="ewip-mid-val font-mono tabular-nums text-3xl font-black">0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DYNAMIC CHARTS CONTAINER -->
+                <div id="overview-charts-container" class="flex flex-col gap-5 shrink-0">
+                    <!-- JS Injected: Big Chart Sections -->
+                </div>
+                </div><!-- END overview-panel-summary -->
+
+                <!-- OVERVIEW SUB-VIEW 2: TREND FIFO DAILY -->
+                <div id="overview-panel-trend-daily" class="hidden flex flex-col gap-4">
+                    <!-- Expanded Trend % FIFO Daily Chart -->
+                    <div class="bento-box p-5 flex flex-col">
+                        <div class="mb-3 shrink-0 flex flex-wrap justify-between items-start gap-3">
+                            <div>
+                                <h2 class="font-batik-display font-bold ewip-panel-title text-sm sm:text-base flex items-center gap-2 tracking-wide">
+                                    <i data-lucide="trending-up" class="w-4 h-4 ewip-accent-icon"></i>
+                                    <span>Trend FIFO Daily (% On-Sched - <span id="fifo-daily-title-cat" class="ewip-accent-text font-black tracking-widest">ALL</span>)</span>
+                                </h2>
+                                <p class="text-[11px] ewip-panel-sub mt-1">Grafik persentase On-Schedule harian serta garis tren performa FIFO.</p>
+                            </div>
+                            <div class="flex items-center gap-2 shrink-0">
+                                <select id="fifo-daily-month-filter" onchange="renderTrendFifoDaily()" class="ewip-trend-select px-3 py-1.5 rounded border text-[10px] font-bold outline-none cursor-pointer shadow-sm uppercase tracking-wider">
+                                    <option value="ALL">SEMUA WAKTU</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="h-[270px] relative w-full min-w-0">
+                            <canvas id="chartFifoDailyTrend"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Horizontal Per-Date Metrics Table (7 Days Upfront, Scrollable to Previous Weeks) -->
+                    <div class="bento-box overflow-hidden flex flex-col">
+                        <div class="ewip-section-divider px-4 lg:px-5 py-3.5 border-b flex flex-wrap justify-between items-center gap-3 shrink-0">
+                            <div>
+                                <h3 class="font-batik-display font-bold ewip-panel-title text-sm flex items-center gap-2 tracking-wide">
+                                    <i data-lucide="table-2" class="w-4 h-4 ewip-accent-icon"></i>
+                                    <span>Rekap Harian FIFO Per-Tanggal (<span id="fifo-daily-table-cat" class="ewip-accent-text font-black">ALL</span>)</span>
+                                </h3>
+                                <p id="fifo-daily-range-info" class="text-[10px] ewip-panel-sub mt-0.5">Menampilkan 7 hari terakhir (H-6 s/d Hari Ini). Geser ke kiri untuk melihat minggu sebelumnya.</p>
+                            </div>
+                            <div class="flex flex-wrap items-center gap-1.5 shrink-0">
+                                <button type="button" onclick="scrollFifoDailyTable(-7)" class="ewip-btn-secondary px-2.5 py-1.5 rounded-md text-[10px] font-bold transition flex items-center gap-1 shadow-sm" title="Geser 1 minggu ke belakang">
+                                    <i data-lucide="chevron-left" class="w-3.5 h-3.5"></i> Minggu Lalu
+                                </button>
+                                <button type="button" onclick="scrollFifoDailyTable('today')" class="ewip-btn-secondary px-2.5 py-1.5 rounded-md text-[10px] font-bold transition flex items-center gap-1 shadow-sm" title="Kembali ke 7 hari terakhir hingga hari ini">
+                                    <i data-lucide="calendar-check-2" class="w-3.5 h-3.5"></i> 7 Hari Terakhir
+                                </button>
+                                <button type="button" onclick="scrollFifoDailyTable(7)" class="ewip-btn-secondary px-2.5 py-1.5 rounded-md text-[10px] font-bold transition flex items-center gap-1 shadow-sm" title="Geser 1 minggu ke depan">
+                                    Minggu Berikutnya <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+                                </button>
+                                <button type="button" onclick="exportFifoDailyToExcel()" class="ewip-btn-primary px-3 py-1.5 rounded-md text-[10px] font-extrabold transition flex items-center gap-1.5 shadow-sm">
+                                    <i data-lucide="download" class="w-3.5 h-3.5"></i> Export Excel
+                                </button>
+                            </div>
+                        </div>
+                        <div id="fifo-daily-table-scroll" class="ewip-fifo-daily-scroll">
+                            <table id="fifo-daily-table" class="ewip-fifo-daily-table">
+                                <thead id="fifo-daily-thead"></thead>
+                                <tbody id="fifo-daily-tbody"></tbody>
+                            </table>
+                        </div>
+                        <div class="ewip-section-divider px-4 py-2.5 border-t text-[10px] ewip-panel-sub flex flex-wrap justify-between items-center gap-2 shrink-0">
+                            <span>Tanggal tanpa input data otomatis bernilai <strong class="font-mono">0</strong>. Scroll horizontal ke kiri untuk menelusuri riwayat minggu sebelumnya.</span>
+                            <span class="font-mono text-[9px] font-bold ewip-accent-text uppercase tracking-wider">Tampilan Awal: 7 Hari Terakhir</span>
+                        </div>
+                    </div>
+                </div><!-- END overview-panel-trend-daily -->
+            </div>
+        </section>
+
+        <!-- ================= MASTER DATA INPUT (UPLOAD) VIEW ================= -->
+        <section id="view-master" class="hidden h-full flex flex-col items-center justify-start py-10 overflow-auto">
+            <div class="bento-box max-w-2xl w-full p-8 text-center relative overflow-hidden shadow-xl shrink-0">
+                <div class="ewip-upload-strip absolute top-0 left-0 w-full"></div>
+                <div class="absolute top-4 right-4" id="greet-master"></div>
+                <div class="ewip-upload-icon w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5 border shadow-inner">
+                    <i data-lucide="library" class="w-8 h-8"></i>
+                </div>
+                <h2 class="font-batik-display text-2xl font-black ewip-accent-text mb-2 tracking-wide">Database Master (MPP)</h2>
+                <p class="text-gray-500 text-xs mb-8 leading-relaxed px-4">Sistem mengekstrak <strong class="text-indigo-600">Seluruh Sheet</strong> secara otomatis.<br/>Data tersimpan terpisah per-file di Server Cloud.</p>
+                
+                <div id="drop-zone-master" class="drop-zone group mb-4">
+                    <input type="file" id="file-input-master" class="hidden" accept=".xlsx, .xls, .csv" multiple>
+                    <div class="bg-white w-14 h-14 rounded-full shadow-sm flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform border border-gray-100 pointer-events-none">
+                        <i data-lucide="upload-cloud" class="text-gray-400 group-hover:text-indigo-500 w-6 h-6 transition-colors"></i>
+                    </div>
+                    <h3 class="text-sm font-bold text-gray-700 group-hover:text-indigo-700 transition pointer-events-none">Upload File MPP All Line</h3>
+                    <p class="text-[10px] text-gray-400 mt-1 pointer-events-none">Seret & lepas 1 atau banyak file Excel di sini</p>
+                </div>
+
+                <div class="flex items-center justify-between bg-indigo-50 p-4 rounded-xl border border-indigo-100 text-[11px] mb-4">
+                    <div class="flex flex-col text-left">
+                        <span class="text-gray-500 font-medium">Total Master Terdaftar</span> 
+                        <strong id="info-master-count" class="text-indigo-800 text-lg font-black leading-none mt-1">0 <span class="text-xs font-bold">Assy</span></strong>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="recalculateValidation()" class="px-4 py-2 bg-white hover:bg-blue-50 text-blue-600 font-bold rounded-lg border border-blue-200 shadow-sm flex items-center gap-1.5 transition">
+                            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Paksa Recalculate
+                        </button>
+                        <button onclick="requireSuperAdmin(resetMasterData)" class="px-4 py-2 bg-white hover:bg-red-50 text-red-600 font-bold rounded-lg border border-red-100 shadow-sm flex items-center gap-1.5 transition">
+                            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Kosongkan
+                        </button>
+                        <button onclick="requireSuperAdmin(resetData)" id="btn-reset" class="hidden px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg shadow-sm flex items-center gap-1.5 transition">
+                            <i data-lucide="power" class="w-3.5 h-3.5"></i> Factory Reset
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- LIST FILE MASTER UPLOADED -->
+                <div class="text-left mt-2 border-t border-gray-100 pt-4">
+                    <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 flex items-center gap-1"><i data-lucide="folder-open" class="w-3.5 h-3.5"></i> File Tergabung saat ini:</h4>
+                    <div id="master-file-list" class="flex flex-col gap-2 max-h-40 overflow-y-auto pr-2 scrollbar-hide"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= DATABASE INPUT (DAILY WIP) VIEW ================= -->
+        <section id="view-input" class="hidden h-full flex flex-col items-center justify-start py-10 overflow-auto">
+            <div class="bento-box max-w-2xl w-full p-8 text-center relative overflow-hidden shadow-xl shrink-0">
+                <div class="ewip-upload-strip absolute top-0 left-0 w-full"></div>
+                <div class="absolute top-4 right-4" id="greet-input"></div>
+                <div class="ewip-upload-icon w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5 border shadow-inner">
+                    <i data-lucide="database" class="w-8 h-8"></i>
+                </div>
+                <h2 class="font-batik-display text-2xl font-black ewip-accent-text mb-2 tracking-wide">Validasi WIP Harian</h2>
+                <p class="text-gray-500 text-xs mb-8 leading-relaxed px-4">Upload <strong>Report WIP</strong> terbaru untuk sinkronisasi harian.<br/>File baru otomatis mengikuti rule STWC Controller.</p>
+                
+                <div id="drop-zone-wip" class="drop-zone group mb-4">
+                    <input type="file" id="file-input-wip" class="hidden" accept=".xlsx, .xls, .csv" multiple>
+                    <div class="bg-white w-14 h-14 rounded-full shadow-sm flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform border border-gray-100 pointer-events-none">
+                        <i data-lucide="upload-cloud" class="text-gray-400 group-hover:text-brand-500 w-6 h-6 transition-colors"></i>
+                    </div>
+                    <h3 class="text-sm font-bold text-gray-700 group-hover:text-brand-700 transition pointer-events-none">Upload Report WIP</h3>
+                    <p class="text-[10px] text-gray-400 mt-1 pointer-events-none">Data tersimpan spesifik per-file di Server</p>
+                </div>
+
+                <div class="flex items-center justify-between bg-gray-50 p-4 rounded-xl border border-gray-200 text-[11px] mb-4">
+                    <div class="flex flex-col text-left">
+                        <span class="text-gray-500 font-medium">Validasi Terakhir</span> 
+                        <strong id="info-last-sync" class="text-gray-800 text-sm font-black mt-1">-</strong>
+                    </div>
+                    <button onclick="resetWipData()" class="px-4 py-2 bg-white hover:bg-red-50 text-red-600 font-bold rounded-lg border border-red-100 shadow-sm flex items-center gap-1.5 transition">
+                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Kosongkan WIP
+                    </button>
+                </div>
+
+                <!-- LIST FILE WIP UPLOADED -->
+                <div class="text-left mt-2 border-t border-gray-100 pt-4">
+                    <h4 class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 flex items-center gap-1"><i data-lucide="folder-open" class="w-3.5 h-3.5"></i> File WIP Hari Ini:</h4>
+                    <div id="wip-file-list" class="flex flex-col gap-2 max-h-40 overflow-y-auto pr-2 scrollbar-hide"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= DATABASE BERSIH VIEW (SOURCE: MASTER DATA) ================= -->
+        <section id="view-control" class="hidden h-full flex flex-col gap-2 pb-4 items-center overflow-hidden">
+            <div class="bento-box w-full max-w-[98%] flex flex-col overflow-hidden h-full mt-2 shadow-sm">
+                <div class="px-4 py-3 bg-white border-b border-gray-200 flex flex-col shrink-0 gap-3">
+                    <div class="flex justify-between items-center w-full">
+                        <div class="text-[14px] font-black text-gray-800 flex items-center gap-2 tracking-tight cursor-pointer" ondblclick="repairDatabase()" title="Klik 2x untuk jalankan Data Repair Tool">
+                            <i data-lucide="database" class="w-5 h-5 text-brand-500"></i> Database Bersih Tervalidasi
+                        </div>
+                        <div class="flex items-center gap-2">
+                                <div class="flex items-center bg-gray-100 rounded border border-gray-200 p-0.5">
+                                    <button onclick="prevControlPage()" class="px-2 py-1 text-gray-500 hover:text-gray-800 hover:bg-white rounded transition"><i data-lucide="chevron-left" class="w-3 h-3"></i></button>
+                                    <span id="control-page-info" class="text-[9px] font-bold text-gray-700 px-2">Page 1</span>
+                                    <button onclick="nextControlPage()" class="px-2 py-1 text-gray-500 hover:text-gray-800 hover:bg-white rounded transition"><i data-lucide="chevron-right" class="w-3 h-3"></i></button>
+                                </div>
+                                <button onclick="exportControlDataXLSX()" class="text-[10px] bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-3 py-1 border border-emerald-200 rounded font-bold shadow-sm transition flex items-center gap-1"><i data-lucide="download" class="w-3 h-3"></i> Export Excel</button>
+                                <button onclick="openStwcModal()" class="text-[10px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-3 py-1 border border-indigo-200 rounded font-bold shadow-sm transition flex items-center gap-1"><i data-lucide="calendar" class="w-3 h-3"></i> Setting STWC Date</button>
+                                <button onclick="clearAllFilters()" class="text-[10px] bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1 border border-red-200 rounded font-bold shadow-sm transition flex items-center gap-1"><i data-lucide="filter-x" class="w-3 h-3"></i> Clear All Filter</button>
+                                <div id="control-counter" class="text-[10px] font-bold text-brand-700 bg-brand-50 px-2.5 py-1 rounded-md border border-brand-100 shadow-sm"></div>
+                            </div>
+                    </div>
+                    <div id="control-periode-tabs" class="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide"></div>
+                </div>
+                
+                <div class="flex-1 flex flex-col bg-gray-50/30 p-2 overflow-hidden w-full">
+                    <div class="bg-white rounded-lg border border-gray-200 shadow-sm flex-1 overflow-auto relative" id="control-table-container">
+                        <table class="min-w-full text-[10px] whitespace-nowrap border-collapse relative">
+                            <thead id="control-thead" class="text-gray-600 bg-gray-50 sticky top-0 shadow-sm z-30"></thead>
+                            <tbody id="control-tbody" class="divide-y divide-gray-100 text-gray-700 bg-white"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= REPORT WIP VIEW (MATRIX) ================= -->
+        <section id="view-report" class="hidden h-full flex flex-col gap-2 overflow-hidden items-center pb-4">
+            <div class="bento-box w-full max-w-[98%] flex flex-col flex-1 overflow-hidden bg-white relative mt-2 shadow-sm">
+                <div id="matrix-export-wrapper" class="flex flex-col h-full overflow-hidden relative">
+                    <div class="ewip-section-divider px-4 py-3 border-b flex justify-between items-center shrink-0" style="background: var(--surface-2);" data-html2canvas-ignore>
+                        <div class="flex items-center gap-2.5">
+                            <div class="ewip-upload-icon border p-1.5 rounded"><i data-lucide="grid" class="w-4 h-4"></i></div>
+                            <div>
+                                <h2 class="font-batik-display font-bold text-sm ewip-accent-text tracking-wide leading-none">Resume Analisis Loading (PP CCT)</h2>
+                                <p class="text-[9px] ewip-panel-sub mt-1 font-medium">Matriks Komprehensif Berdasarkan WPP &amp; Potensi Problem</p>
+                            </div>
+                        </div>
+                        <button onclick="downloadResumeImage()" class="ewip-btn-primary flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-[10px] font-extrabold shadow transition">
+                            <i data-lucide="camera" class="w-3.5 h-3.5"></i> Export Matriks
+                        </button>
+                    </div>
+                    
+                    <div id="matrix-scroll-container" class="overflow-auto flex-1 p-3 bg-gray-50/50">
+                        <div class="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden inline-block min-w-full">
+                            <table class="excel-table whitespace-nowrap bg-white w-full" id="the-matrix-table">
+                                <thead class="sticky top-0 z-10 shadow-sm bg-gray-100">
+                                    <tr>
+                                        <th class="w-16">PERIODE</th><th class="w-12">WPP</th><th class="w-32 text-left">PROBLEM</th>
+                                        <th class="w-14">ADD (E/A)</th><th class="w-14">CAT (C)</th><th class="w-14">REG (/)</th>
+                                        <th class="w-14">SMC (S)</th><th class="w-14">SMV (-)</th><th class="w-20 bg-gray-200 text-gray-800">Grand Total</th>
+                                        <th class="w-24">REMARKS</th><th class="w-16">%-TAGE</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="matrix-tbody"></tbody>
+                                <tfoot id="matrix-tfoot" class="sticky bottom-0 z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]"></tfoot>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= SH MATERIAL VIEW ================= -->
+        <section id="view-sh" class="hidden h-full flex flex-col gap-3 overflow-hidden pb-4">
+            <div class="flex justify-between items-center shrink-0 px-4 mt-2">
+                <div>
+                    <h2 class="text-lg font-black text-gray-800 flex items-center gap-2 tracking-tight"><i data-lucide="shield-alert" class="text-amber-500 w-5 h-5"></i> Daftar Shortage Material</h2>
+                    <p class="text-[10px] text-gray-500 font-medium">Klik pada baris material untuk melihat detail & konfirmasi kedatangan.</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <div id="greet-sh" class="mr-2"></div>
+                    <button id="btn-sh-login" onclick="requireAccess(Object.keys(AUTH_PROFILES), () => {})" class="bg-gray-800 hover:bg-gray-900 text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-sm" title="Login untuk mengakses menu SH">
+                        <i data-lucide="lock" class="w-3.5 h-3.5"></i> Login Akses
+                    </button>
+                    <button onclick="exportTabShToExcel()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-sm" title="Export Excel">
+                        <i data-lucide="download" class="w-4 h-4"></i> Export
+                    </button>
+                    <button id="btn-sh-refresh-all" onclick="requireAccess(['110603', '111111'], refreshAllOpenShImpact)" class="hidden bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-sm" title="Refresh seluruh list Assy terdampak dari SH yang masih OPEN">
+                        <i data-lucide="refresh-cw" class="w-4 h-4"></i> Refresh All Open SH
+                    </button>
+                    <button id="btn-sh-batch-remarks" onclick="requireAccess(['010625', '111111', '050205'], openBatchRemarksModal)" class="hidden bg-violet-600 hover:bg-violet-700 text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-sm">
+                        <i data-lucide="message-square-plus" class="w-4 h-4"></i> Batch Remarks
+                    </button>
+                    <button id="btn-sh-batch-confirm" onclick="requireAccess(['110603', '111111'], openBatchConfirmModal)" class="hidden bg-sky-600 hover:bg-sky-700 text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-sm">
+                        <i data-lucide="check-square" class="w-4 h-4"></i> Batch Kedatangan
+                    </button>
+                    <button id="btn-sh-batch-input" onclick="requireAccess(['110603', '111111'], openBatchShModal)" class="hidden bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-sm">
+                        <i data-lucide="layers" class="w-4 h-4"></i> Batch SH
+                    </button>
+                    <button id="btn-sh-single-input" onclick="requireAccess(['110603', '111111'], openShInputModal)" class="hidden bg-amber-500 hover:bg-amber-600 text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-sm">
+                        <i data-lucide="plus-circle" class="w-4 h-4"></i> Single SH
+                    </button>
+                </div>
+            </div>
+            <div class="flex-1 overflow-auto bg-gray-50/30 p-2 mx-2 border border-gray-200 rounded-lg shadow-sm">
+                <table class="w-full text-xs whitespace-nowrap border-collapse text-left">
+                    <thead class="bg-gray-100 text-gray-600 sticky top-0 shadow-sm z-10 font-bold uppercase tracking-wider text-[10px]">
+                        <tr>
+                            <th class="p-3 border-b border-gray-200 w-48">
+                                <input type="text" id="filter-sh-name" placeholder="Item ID / Part Name..." onkeyup="renderShMaterials()" class="w-full bg-transparent border-b border-gray-300 outline-none focus:border-amber-500 py-0.5 text-gray-800 placeholder-gray-400">
+                            </th>
+                            <th class="p-3 border-b border-gray-200 text-center">
+                                <select id="filter-sh-type" onchange="renderShMaterials()" class="bg-transparent border-b border-gray-300 outline-none cursor-pointer focus:border-amber-500 py-0.5">
+                                    <option value="ALL">KATEGORI (SEMUA)</option>
+                                    <option value="Terminal">Terminal</option>
+                                    <option value="Accessories">Accessories</option>
+                                    <option value="Wire">Wire</option>
+                                    <option value="Tube">Tube</option>
+                                    <option value="Lain-lain">Lain-lain</option>
+                                </select>
+                            </th>
+                            <th class="p-3 border-b border-gray-200 text-center">
+                                <input type="date" id="filter-sh-date" onchange="renderShMaterials()" class="bg-transparent border-b border-gray-300 outline-none focus:border-amber-500 py-0.5 cursor-pointer text-gray-600">
+                            </th>
+                            <th class="p-3 border-b border-gray-200 text-center">Estimasi Kedatangan</th>
+                            <th class="p-3 border-b border-gray-200 text-center">
+                                <select id="filter-sh-status" onchange="renderShMaterials()" class="bg-transparent border-b border-gray-300 outline-none cursor-pointer focus:border-amber-500 py-0.5">
+                                    <option value="ALL">STATUS (SEMUA)</option>
+                                    <option value="CND 1">CND 1</option>
+                                    <option value="ARRIVED">ARRIVED</option>
+                                </select>
+                            </th>
+                            <th class="p-3 border-b border-gray-200 text-right">Terdampak</th>
+                            <th class="p-3 border-b border-gray-200 text-center">
+                                <select id="filter-sh-mcl" onchange="renderShMaterials()" class="bg-transparent border-b border-gray-300 outline-none cursor-pointer focus:border-amber-500 py-0.5">
+                                    <option value="ALL">KONFIRM. MCL (ALL)</option>
+                                    <option value="Confirming">Confirming</option>
+                                    <option value="Increasing">Increasing</option>
+                                    <option value="Ready Stock PP">Ready Stock PP</option>
+                                    <option value="ETA">ETA</option>
+                                    <option value="Persamaan">Persamaan</option>
+                                    <option value="Deviasi">Deviasi</option>
+                                    <option value="Arriving">Arriving</option>
+                                    <option value="New Part">New Part</option>
+                                    <option value="Lain-lain">Lain-lain</option>
+                                    <option value="KOSONG">Belum Ada</option>
+                                </select>
+                            </th>
+                            <th class="p-3 border-b border-gray-200 w-48">Log Interaksi (Remarks)</th>
+                            <th class="p-3 border-b border-gray-200 text-center w-24">PIC Input</th>
+                            <th class="p-3 border-b border-gray-200 text-center w-24">PIC Closed</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sh-table-body" class="divide-y divide-gray-100 bg-white"></tbody>
+                </table>
+            </div>
+        </section>
+
+<!-- ================= ASSY PAYLATER VIEW ================= -->
+        <section id="view-paylater" class="hidden h-full flex flex-col gap-3 overflow-hidden pb-4">
+            <div class="flex justify-between items-center shrink-0 px-4 mt-2">
+                <div>
+                    <h2 class="text-lg font-black text-purple-700 flex items-center gap-2 tracking-tight"><i data-lucide="truck" class="w-5 h-5"></i> Manajemen Assy Paylater</h2>
+                    <p class="text-[10px] text-gray-500 font-medium mb-1.5">Assy telah berstatus CLOSED namun aktual fisik belum didorong/diserahterimakan.</p>
+                    <div class="flex items-center gap-2">
+                        <span class="bg-purple-100 text-purple-800 px-2 py-0.5 rounded font-bold text-[10px] shadow-sm border border-purple-200" id="py-count-open">Belum Dorong: 0</span>
+                        <span class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-bold text-[10px] shadow-sm border border-emerald-200" id="py-count-closed">Sudah Dorong: 0</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <select id="filter-paylater-wip" onchange="renderPaylaterTable()" class="text-xs border border-purple-200 bg-purple-50 text-purple-800 font-bold px-3 py-2 rounded-lg outline-none cursor-pointer focus:border-purple-500">
+                        <option value="ALL">Semua Status Paylater</option>
+                        <option value="OPEN">Belum Dorong (Aktif)</option>
+                        <option value="CLOSED">Sudah Dorong (Riwayat)</option>
+                    </select>
+                    <button onclick="exportPaylaterToExcel()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-sm">
+                        <i data-lucide="download" class="w-4 h-4"></i> Export Excel
+                    </button>
+                    <button onclick="requireAccess(['110603', '050205', '010625', '111111'], openBatchDorongModal)" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-sm">
+                        <i data-lucide="check-square" class="w-4 h-4"></i> Batch Dorong
+                    </button>
+                    <button onclick="requireAccess(['110603', '050205', '010625', '111111'], openPaylaterModal)" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-sm">
+                        <i data-lucide="plus-circle" class="w-4 h-4"></i> Input Paylater
+                    </button>
+                </div>
+            </div>
+            <div class="flex-1 overflow-auto bg-gray-50/30 p-2 mx-2 border border-purple-200 rounded-lg shadow-sm">
+                <table class="w-full text-xs whitespace-nowrap border-collapse text-left">
+                    <thead class="bg-purple-50 text-purple-900 sticky top-0 shadow-sm z-10 font-bold uppercase tracking-wider text-[10px]">
+                        <tr>
+                            <th class="p-3 border-b border-purple-200 text-center">Status Paylater</th>
+                            <th class="p-3 border-b border-purple-200 text-center">Tgl Regist</th>
+                            <th class="p-3 border-b border-purple-200 text-center">Tgl Dorong</th>
+                            <th class="p-3 border-b border-purple-200 text-center w-24">
+                                <input type="text" id="filter-py-periode" placeholder="Periode..." onkeyup="renderPaylaterTable()" class="w-full bg-transparent border-b border-purple-300 outline-none focus:border-purple-500 py-0.5 text-purple-900 placeholder-purple-400 font-normal">
+                            </th>
+                            <th class="p-3 border-b border-purple-200 w-48">
+                                <input type="text" id="filter-py-assy" placeholder="Assy No..." onkeyup="renderPaylaterTable()" class="w-full bg-transparent border-b border-purple-300 outline-none focus:border-purple-500 py-0.5 text-purple-900 placeholder-purple-400 font-normal">
+                            </th>
+                            <th class="p-3 border-b border-purple-200 text-center w-24">
+                                <input type="text" id="filter-py-wp" placeholder="WP..." onkeyup="renderPaylaterTable()" class="w-full bg-transparent border-b border-purple-300 outline-none focus:border-purple-500 py-0.5 text-purple-900 placeholder-purple-400 font-normal">
+                            </th>
+                            <th class="p-3 border-b border-purple-200 text-right">QTY DB</th>
+                            <th class="p-3 border-b border-purple-200 w-48">Remarks / Alasan</th>
+                            <th class="p-3 border-b border-purple-200 text-center">PIC Input</th>
+                            <th class="p-3 border-b border-purple-200 text-center">PIC Dorong</th>
+                        </tr>
+                    </thead>
+                    <tbody id="paylater-table-body" class="divide-y divide-purple-100 bg-white"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- PAYLATER INPUT MODAL -->
+        <div id="paylater-input-modal" class="fixed inset-0 bg-gray-900/80 z-[9999] hidden flex flex-col items-center justify-center p-4 lg:p-10 backdrop-blur-sm transition-opacity">
+            <div class="bg-white rounded-xl shadow-2xl w-full max-w-6xl h-full max-h-[90vh] flex flex-col overflow-hidden border border-gray-200">
+                <div class="px-5 py-4 border-b border-purple-200 bg-purple-50 flex justify-between items-center shrink-0">
+                    <div class="flex items-center gap-3">
+                        <div class="bg-purple-600 text-white p-2 rounded-lg"><i data-lucide="truck" class="w-5 h-5"></i></div>
+                        <div>
+                            <h3 class="font-bold text-lg text-gray-800 tracking-tight leading-none">Input Assy Paylater</h3>
+                            <span class="text-[10px] text-purple-700 font-bold bg-purple-100 px-2 py-0.5 rounded mt-1 inline-block">Validasi Material Closed yang tertahan</span>
+                        </div>
+                    </div>
+                    <button onclick="closePaylaterModal()" class="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+                </div>
+                
+                <div class="p-4 bg-white border-b border-gray-100 shrink-0 flex flex-col gap-3">
+                    <div class="flex flex-col gap-1 w-full">
+                        <div class="flex justify-between items-center mb-1">
+                            <label class="block text-[10px] font-bold text-gray-500 uppercase">List Assy & WP (Format: ASSY WP pemisah spasi/enter)</label>
+                            <button onclick="openPaylaterSelectModal('INPUT')" class="text-[10px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-3 py-1 border border-indigo-200 rounded font-bold shadow-sm transition flex items-center gap-1"><i data-lucide="list-plus" class="w-3 h-3"></i> Select Assy</button>
+                        </div>
+                        <textarea id="py-manual-input" class="w-full text-xs h-16 p-2 border border-gray-300 rounded focus:border-purple-500 outline-none shadow-sm" placeholder="Contoh Paste Excel atau ketik manual:\n12345678 A\n87654321 E"></textarea>
+                    </div>
+                    <button onclick="validatePaylaterData()" class="bg-gray-800 hover:bg-gray-900 text-white font-bold py-2 px-8 rounded shadow flex items-center justify-center gap-2 transition w-full md:w-auto self-center mt-2"><i data-lucide="check-circle-2" class="w-4 h-4"></i> Validasi List Paylater</button>
+                </div>
+
+                <div class="flex-1 overflow-auto p-0 bg-gray-50">
+                    <table class="excel-table w-full whitespace-nowrap bg-white">
+                        <thead class="sticky top-0 shadow-sm z-10 bg-gray-100">
+                            <tr>
+                                <th class="w-12 text-center">AKSI</th>
+                                <th class="w-20">PERIODE</th>
+                                <th class="text-left w-48">ASSY NO TERVALIDASI</th>
+                                <th class="w-24 text-center">WP</th>
+                                <th class="w-20 text-center text-indigo-600">QTY DB</th>
+                                <th class="w-32 text-center text-purple-700">TGL SCANOUT INDIVIDU</th>
+                                <th class="w-48 text-center">REMARKS ALASAN</th>
+                            </tr>
+                        </thead>
+                        <tbody id="py-validation-tbody" class="divide-y divide-gray-100">
+                            <tr><td colspan="7" class="text-center p-8 text-gray-400 font-medium">Input list Assy + WP, atau Select Assy, lalu klik Validasi.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="p-4 border-t border-gray-200 bg-white flex justify-between items-center shrink-0">
+                    <div id="py-validation-summary" class="text-[10px] font-bold text-gray-500">Total Validasi: 0 Assy</div>
+                    <div class="flex items-center gap-3">
+                        <div class="flex flex-col">
+                            <label class="text-[9px] font-bold text-gray-500 uppercase mb-0.5" title="Digunakan jika tgl individu kosong">Tgl Scanout Default</label>
+                            <input type="date" id="py-scanout-input" class="text-xs border border-gray-300 px-2 py-1.5 rounded focus:border-purple-500 outline-none text-gray-700 bg-white shadow-sm">
+                        </div>
+                        <button onclick="savePaylaterData()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-6 rounded-lg shadow-md transition flex items-center gap-2 h-full mt-3.5"><i data-lucide="save" class="w-4 h-4"></i> Simpan ke Paylater</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- PAYLATER BATCH DORONG MODAL -->
+        <div id="paylater-dorong-modal" class="fixed inset-0 bg-gray-900/80 z-[9999] hidden flex flex-col items-center justify-center p-4 lg:p-10 backdrop-blur-sm transition-opacity">
+            <div class="bg-white rounded-xl shadow-2xl w-full max-w-5xl h-full max-h-[80vh] flex flex-col overflow-hidden border border-gray-200">
+                <div class="px-5 py-4 border-b border-emerald-200 bg-emerald-50 flex justify-between items-center shrink-0">
+                    <div class="flex items-center gap-3">
+                        <div class="bg-emerald-600 text-white p-2 rounded-lg"><i data-lucide="check-square" class="w-5 h-5"></i></div>
+                        <div>
+                            <h3 class="font-bold text-lg text-gray-800 tracking-tight leading-none">Batch Dorong Assy Paylater</h3>
+                            <span class="text-[10px] text-emerald-700 font-bold bg-emerald-100 px-2 py-0.5 rounded mt-1 inline-block">Selesaikan status tertahan secara massal</span>
+                        </div>
+                    </div>
+                    <button onclick="closeBatchDorongModal()" class="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+                </div>
+                
+                <div class="p-4 bg-white border-b border-gray-100 shrink-0 flex flex-col gap-3">
+                    <div class="flex flex-col gap-1 w-full">
+                        <div class="flex justify-between items-center mb-1">
+                            <label class="block text-[10px] font-bold text-gray-500 uppercase">List Assy & WP (Format: ASSY WP)</label>
+                            <button onclick="openPaylaterSelectModal('DORONG')" class="text-[10px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-3 py-1 border border-indigo-200 rounded font-bold shadow-sm transition flex items-center gap-1"><i data-lucide="list-plus" class="w-3 h-3"></i> Select Assy Paylater</button>
+                        </div>
+                        <textarea id="py-dorong-manual-input" class="w-full text-xs h-16 p-2 border border-gray-300 rounded focus:border-emerald-500 outline-none shadow-sm" placeholder="Paste Assy yang sudah didorong fisik..."></textarea>
+                    </div>
+                    <button onclick="validateBatchDorong()" class="bg-gray-800 hover:bg-gray-900 text-white font-bold py-2 px-8 rounded shadow flex items-center justify-center gap-2 transition w-full md:w-auto self-center mt-2"><i data-lucide="search" class="w-4 h-4"></i> Cari & Validasi Paylater Aktif</button>
+                </div>
+
+                <div class="flex-1 overflow-auto p-0 bg-gray-50">
+                    <table class="excel-table w-full whitespace-nowrap bg-white">
+                        <thead class="sticky top-0 shadow-sm z-10 bg-gray-100">
+                            <tr>
+                                <th class="w-12 text-center">AKSI</th>
+                                <th class="text-left w-48">ASSY NO TERVALIDASI</th>
+                                <th class="w-24 text-center">WP</th>
+                                <th class="w-32 text-center">TGL SCANOUT AWAL</th>
+                                <th class="w-32 text-center text-emerald-700">TGL DORONG INDIVIDU</th>
+                            </tr>
+                        </thead>
+                        <tbody id="py-dorong-tbody" class="divide-y divide-gray-100">
+                            <tr><td colspan="5" class="text-center p-8 text-gray-400 font-medium">Input list Assy + WP yang mau didorong, lalu klik Validasi.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="p-4 border-t border-gray-200 bg-white flex justify-end items-center shrink-0 gap-3">
+                    <div class="flex flex-col">
+                        <label class="text-[9px] font-bold text-gray-500 uppercase mb-0.5" title="Digunakan jika tgl individu kosong">Tgl Dorong Default</label>
+                        <input type="date" id="py-dorong-date-input" class="text-xs border border-gray-300 px-2 py-1.5 rounded focus:border-emerald-500 outline-none text-gray-700 bg-white shadow-sm">
+                    </div>
+                    <button onclick="saveBatchDorong()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-6 rounded-lg shadow-md transition flex items-center gap-2 h-full mt-3.5"><i data-lucide="check-square" class="w-4 h-4"></i> Eksekusi Status Dorong</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- PAYLATER DETAIL MODAL (KLIK BARIS TAMPIL DI TENGAH LAYAR) -->
+        <div id="paylater-detail-modal" class="fixed inset-0 bg-gray-900/80 z-[10002] hidden flex items-center justify-center p-4 backdrop-blur-sm transition-opacity">
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col border border-gray-200">
+                <div class="px-6 py-4 border-b border-gray-200 bg-purple-50 flex justify-between items-center shrink-0">
+                    <h3 class="font-black text-purple-900 text-lg flex items-center gap-2"><i data-lucide="info" class="w-5 h-5 text-purple-600"></i> Detail Assy Paylater</h3>
+                    <button onclick="closePaylaterDetailModal()" class="text-gray-400 hover:text-red-500 bg-white border shadow-sm p-1.5 rounded transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+                </div>
+                <div class="p-6" id="paylater-detail-content">
+                    <!-- JS Inject -->
+                </div>
+            </div>
+        </div>
+
+        <!-- PAYLATER SELECT ASSY MODAL (Untuk Input & Dorong) -->
+        <div id="paylater-select-modal" class="fixed inset-0 bg-gray-900/80 z-[10005] hidden flex items-center justify-center p-4 backdrop-blur-sm transition-opacity">
+            <div class="bg-white rounded-xl shadow-2xl w-full max-w-3xl h-full max-h-[85vh] flex flex-col overflow-hidden border border-gray-200">
+                <div class="px-5 py-4 border-b border-indigo-200 bg-indigo-50 flex justify-between items-center shrink-0">
+                    <h3 class="font-black text-indigo-900 flex items-center gap-2"><i data-lucide="list-plus" class="w-5 h-5"></i> Pilih Assy untuk Paylater</h3>
+                    <button onclick="closePaylaterSelectModal()" class="text-indigo-400 hover:text-red-500 hover:bg-white p-1 rounded transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+                </div>
+                <div class="p-3 border-b border-gray-200 bg-white flex gap-3 shrink-0">
+                    <div class="flex-1 relative">
+                        <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i>
+                        <input type="text" id="py-search-assy" placeholder="Cari Assy..." onkeyup="filterPaylaterSelect()" class="w-full text-xs pl-9 pr-3 py-2 border border-gray-300 rounded focus:border-indigo-500 outline-none shadow-sm">
+                    </div>
+                    <div class="flex-1 relative">
+                        <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i>
+                        <input type="text" id="py-search-wp" placeholder="Cari WP..." onkeyup="filterPaylaterSelect()" class="w-full text-xs pl-9 pr-3 py-2 border border-gray-300 rounded focus:border-indigo-500 outline-none shadow-sm">
+                    </div>
+                </div>
+                <div class="flex-1 overflow-auto bg-gray-50/50 p-0">
+                    <table class="w-full text-[10px] whitespace-nowrap border-collapse text-left excel-table">
+                        <thead class="bg-gray-100 text-gray-600 sticky top-0 shadow-sm z-10 font-bold uppercase">
+                            <tr>
+                                <th class="p-2 w-24 text-center">Status DB</th>
+                                <th class="p-2">Assy No</th>
+                                <th class="p-2 w-24 text-center">WP</th>
+                                <th class="p-2 w-24 text-center">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody id="paylater-select-tbody" class="divide-y divide-gray-200 bg-white">
+                            <!-- JS Injected -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= ASSY ROCKET VIEW ================= -->
+        <section id="view-rocket" class="hidden h-full flex flex-col gap-3 overflow-hidden pb-4">
+            <div class="flex justify-between items-center shrink-0 px-4 mt-2">
+                <div>
+                    <h2 class="text-lg font-black text-pink-700 flex items-center gap-2 tracking-tight"><i data-lucide="rocket" class="w-5 h-5"></i> Manajemen Assy Rocket</h2>
+                    <p class="text-[10px] text-gray-500 font-medium">Prioritas STWC & Produksi khusus (Otomatis ditandai Pink di Database Bersih).</p>
+                </div>
+                <div class="flex items-center gap-3">
+                    <div id="greet-rocket"></div>
+                    <select id="filter-rocket-status" onchange="renderRocketTable()" class="text-xs border border-pink-200 bg-pink-50 text-pink-800 font-bold px-3 py-2 rounded-lg outline-none cursor-pointer focus:border-pink-500">
+                        <option value="ALL">Semua Status (Urgent, Rocket)</option>
+                        <option value="Urgent">Urgent</option>
+                        <option value="Top Urgent">Top Urgent</option>
+                        <option value="Rocket">Rocket</option>
+                    </select>
+                    <button onclick="requireAccess(['110603', '010625', '111111'], openRocketModal)" class="bg-pink-600 hover:bg-pink-700 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-sm">
+                        <i data-lucide="plus-circle" class="w-4 h-4"></i> Tetapkan Assy Rocket
+                    </button>
+                </div>
+            </div>
+            <div class="flex-1 overflow-auto bg-gray-50/30 p-2 mx-2 border border-pink-200 rounded-lg shadow-sm">
+                <table class="w-full text-xs whitespace-nowrap border-collapse text-left">
+                    <thead class="bg-pink-50 text-pink-900 sticky top-0 shadow-sm z-10 font-bold uppercase tracking-wider text-[10px]">
+                        <tr>
+                            <th class="p-3 border-b border-pink-200 text-center w-10">Aksi</th>
+                            <th class="p-3 border-b border-pink-200 text-center">Prioritas</th>
+                            <th class="p-3 border-b border-pink-200 text-center">Tgl Rocket (Target)</th>
+                            <th class="p-3 border-b border-pink-200 text-center">Periode</th>
+                            <th class="p-3 border-b border-pink-200">Assy No</th>
+                            <th class="p-3 border-b border-pink-200 text-center">WP</th>
+                            <th class="p-3 border-b border-pink-200 text-right">Sisa Qty DB</th>
+                            <th class="p-3 border-b border-pink-200 text-center">
+                                <select id="filter-rocket-wip" onchange="renderRocketTable()" class="bg-transparent border-b border-pink-300 outline-none cursor-pointer focus:border-pink-500 py-0.5 font-bold">
+                                    <option value="ALL">STATUS WIP</option>
+                                    <option value="OPEN">OPEN (ALL)</option>
+                                    <option value="CLOSED">CLOSED</option>
+                                </select>
+                            </th>
+                            <th class="p-3 border-b border-pink-200">Remarks</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rocket-table-body" class="divide-y divide-pink-100 bg-white"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- SHORTAGE MASS-INPUT MODAL -->
+        <div id="sh-input-modal" class="fixed inset-0 bg-gray-900/80 z-[9999] hidden flex flex-col items-center justify-center p-4 lg:p-10 backdrop-blur-sm transition-opacity">
+            <div class="bg-white rounded-xl shadow-2xl w-full max-w-5xl h-full max-h-[90vh] flex flex-col overflow-hidden border border-gray-200">
+                <div class="px-5 py-4 border-b border-amber-200 flex justify-between items-center bg-amber-50 shrink-0">
+                    <div class="flex items-center gap-3">
+                        <div class="bg-amber-500 text-white p-2 rounded-lg"><i data-lucide="shield-alert" class="w-5 h-5"></i></div>
+                        <div>
+                            <h3 class="font-bold text-lg text-gray-800 tracking-tight leading-none">Input / Import Shortage Material</h3>
+                            <span class="text-[10px] text-amber-700 font-bold bg-amber-100 px-2 py-0.5 rounded mt-1 inline-block">Validasi & Akumulasi Dampak CCT</span>
+                        </div>
+                    </div>
+                    <button onclick="closeShInputModal()" class="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+                </div>
+                
+                <div class="p-4 bg-white border-b border-gray-100 shrink-0 flex flex-col gap-3">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                        <div>
+                            <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Kategori Part (Info)</label>
+                            <select id="sh-type-input" class="w-full text-xs border border-gray-300 px-2 py-1.5 rounded focus:border-amber-500 outline-none bg-white font-bold text-amber-700">
+                            <option value="" disabled selected>- WAJIB Pilih Kategori -</option>
+                            <option value="Terminal">Terminal</option>
+                            <option value="Accessories">Accessories</option>
+                            <option value="Wire">Wire</option>
+                            <option value="Tube">Tube</option>
+                            <option value="Lain-lain">Lain-lain</option>
+                        </select>
+                        </div>
+                        <div><label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Nama Part / Item ID</label><input type="text" id="sh-item-id-input" placeholder="ID Part / Nama Part" class="w-full text-xs border px-2 py-1.5 rounded focus:border-amber-500 outline-none"></div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Rentang Periode DB (Mulai - Akhir)</label>
+                            <div class="flex gap-2">
+                                <select id="sh-per-start" class="w-1/2 text-xs border px-2 py-1.5 rounded focus:border-amber-500 outline-none bg-white"></select>
+                                <select id="sh-per-end" class="w-1/2 text-xs border px-2 py-1.5 rounded focus:border-amber-500 outline-none bg-white"></select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 mt-2">
+                        <div class="border border-gray-200 rounded-lg p-5 bg-gray-50 flex flex-col justify-center items-center text-center">
+                            <div class="mb-3">
+                                <label class="block text-sm font-black text-indigo-700 mb-1"><i data-lucide="file-spreadsheet" class="w-5 h-5 inline"></i> Import File Excel "Where Used"</label>
+                                <p class="text-[10px] text-gray-500 max-w-md mx-auto leading-relaxed">Sistem akan otomatis mengekstrak kolom <strong>"ASSY NO"</strong> dan mengalikan beban berdasarkan kolom <strong>"QTY" / "USAGE"</strong>. Pastikan rentang DB sudah terisi!</p>
+                            </div>
+                            <input type="file" id="sh-excel-upload" accept=".xlsx, .xls, .csv" class="text-xs text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:font-black file:bg-indigo-100 file:text-indigo-700 hover:file:bg-indigo-200 transition cursor-pointer shadow-sm w-full md:w-auto text-center" onclick="this.value=null;" onchange="handleShExcelUpload(event)">
+                        </div>
+                    </div>
+                    
+                    <div class="flex justify-center mt-2">
+                        <button onclick="validateShData()" id="btn-sh-validate" class="bg-gray-800 hover:bg-gray-900 text-white font-bold py-2 px-8 rounded shadow-lg flex items-center justify-center gap-2 transition w-full md:w-auto"><i data-lucide="check-circle-2" class="w-4 h-4"></i> Validasi List Assy</button>
+                    </div>
+                </div>
+
+                <div class="flex-1 overflow-auto p-0 bg-gray-50">
+                    <table class="excel-table w-full whitespace-nowrap bg-white">
+                        <thead class="sticky top-0 shadow-sm z-10 bg-gray-100">
+                            <tr><th class="w-12 text-center">AKSI</th><th class="w-20">PERIODE</th><th class="text-left w-48">ASSY NO TERVALIDASI</th><th class="w-24 text-center">WP</th><th class="w-24 text-center">STATUS</th><th class="w-20 text-center text-indigo-600">QTY DB</th><th class="w-16 text-center text-pink-600">USAGE</th><th class="w-24 text-right text-pink-700">NEED MATERIAL</th><th class="text-left text-red-600">TOTAL CCT DAMPAK</th></tr>
+                        </thead>
+                        <tbody id="sh-validation-tbody" class="divide-y divide-gray-100">
+                            <tr><td colspan="9" class="text-center p-8 text-gray-400 font-medium">Input list Assy dan Periode, lalu klik Validasi List Assy.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="p-4 border-t border-gray-200 bg-white flex justify-between items-center shrink-0">
+                    <div id="sh-validation-summary" class="text-[10px] font-bold text-gray-500">Total Validasi: 0 Assy</div>
+                    <button onclick="confirmSaveSh()" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-6 rounded-lg shadow-md transition flex items-center gap-2"><i data-lucide="shield-alert" class="w-4 h-4"></i> Tetapkan sebagai SH (Shortage)</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- SH EDIT MODAL (POP-UP ESTIMASI & REMARKS) -->
+        <div id="sh-edit-modal" class="fixed inset-0 bg-gray-900/80 z-[10005] hidden flex items-center justify-center p-4 backdrop-blur-sm transition-opacity">
+            <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden border border-gray-200">
+                <div class="px-5 py-4 border-b border-amber-200 bg-amber-50 flex justify-between items-center">
+                    <h3 class="font-black text-amber-900 flex items-center gap-2"><i data-lucide="edit" class="w-4 h-4"></i> Edit Estimasi & Remarks SH</h3>
+                    <button onclick="closeEditShModal()" class="text-amber-500 hover:text-red-500 transition"><i data-lucide="x" class="w-4 h-4"></i></button>
+                </div>
+                <div class="p-5 flex flex-col gap-4">
+                    <input type="hidden" id="sh-edit-id">
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Status Konfirmasi MCL</label>
+                            <select id="sh-edit-konfirm" class="w-full text-[11px] border border-gray-300 px-2 py-2 rounded focus:border-amber-500 outline-none text-gray-800 font-bold bg-white shadow-sm cursor-pointer">
+                                <option value="">- Set Status -</option>
+                                <option value="Confirming">Confirming</option>
+                                <option value="Increasing">Increasing</option>
+                                <option value="Ready Stock PP">Ready Stock PP</option>
+                                <option value="ETA">ETA</option>
+                                <option value="Persamaan">Persamaan</option>
+                                <option value="Deviasi">Deviasi</option>
+                                <option value="Arriving">Arriving</option>
+                                <option value="New Part">New Part</option>
+                                <option value="Lain-lain">Lain-lain</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Estimasi Kedatangan</label>
+                            <input type="date" id="sh-edit-est" class="w-full text-[11px] border border-gray-300 px-2 py-2 rounded focus:border-amber-500 outline-none text-gray-800 font-bold bg-white shadow-sm cursor-pointer">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Log Interaksi Baru (Remarks)</label>
+                        <textarea id="sh-edit-remarks" placeholder="Tambahkan catatan / ketik balasan interaksi..." class="w-full text-xs h-24 p-3 border border-gray-300 rounded focus:border-amber-500 outline-none shadow-sm resize-none"></textarea>
+                    </div>
+                </div>
+                <div class="p-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-2">
+                    <button onclick="closeEditShModal()" class="px-4 py-2 rounded text-xs font-bold text-gray-500 hover:bg-gray-200 transition">Batal</button>
+                    <button onclick="saveEditSh()" class="bg-amber-500 hover:bg-amber-600 text-white px-6 py-2 rounded shadow-md text-xs font-bold flex items-center gap-2 transition"><i data-lucide="save" class="w-3.5 h-3.5"></i> Simpan Perubahan</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- CAPTCHA DELETE MODAL -->
+        <div id="captcha-delete-modal" class="fixed inset-0 bg-gray-900/80 z-[10006] hidden flex items-center justify-center p-4 backdrop-blur-sm transition-opacity">
+            <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden border border-red-200">
+                <div class="px-5 py-4 border-b border-red-200 bg-red-50 flex justify-between items-center">
+                    <h3 class="font-black text-red-900 flex items-center gap-2"><i data-lucide="alert-triangle" class="w-5 h-5"></i> Konfirmasi Penghapusan</h3>
+                    <button onclick="closeCaptchaModal()" class="text-red-400 hover:text-red-600 transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+                </div>
+                <div class="p-6 flex flex-col gap-4 text-center">
+                    <p class="text-xs text-gray-600 font-bold">Tindakan ini permanen. Ketik kode di bawah untuk melanjutkan:</p>
+                    <div class="bg-gray-100 py-3 rounded-lg border border-gray-200">
+                        <span id="captcha-text" class="text-2xl font-black text-gray-800 tracking-widest select-none"></span>
+                    </div>
+                    <input type="text" id="captcha-input" placeholder="Ketik kode di sini..." class="w-full text-center text-lg font-bold border border-gray-300 px-3 py-2.5 rounded-lg focus:border-red-500 focus:ring-2 focus:ring-red-200 outline-none text-gray-800 bg-white shadow-inner uppercase">
+                </div>
+                <div class="p-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-2">
+                    <button onclick="closeCaptchaModal()" class="px-4 py-2 rounded-lg text-xs font-bold text-gray-500 hover:bg-gray-200 transition">Batal</button>
+                    <button onclick="verifyCaptcha()" class="bg-red-500 hover:bg-red-600 text-white px-6 py-2 rounded-lg shadow-md text-xs font-bold flex items-center gap-2 transition"><i data-lucide="trash-2" class="w-4 h-4"></i> Hapus Sekarang</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- SH DETAIL MODAL (KLIK BARIS) -->
+        <div id="sh-detail-modal" class="fixed inset-0 bg-gray-900/80 z-[10002] hidden flex items-center justify-center p-4 lg:p-8 backdrop-blur-sm transition-opacity">
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden border border-gray-200">
+                <div class="px-6 py-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center shrink-0">
+                    <h3 class="font-black text-gray-800 text-lg flex items-center gap-2"><i data-lucide="info" class="w-5 h-5 text-amber-500"></i> Detail Material Shortage</h3>
+                    <button onclick="closeShDetailModal()" class="text-gray-400 hover:text-red-500 bg-white border shadow-sm p-1.5 rounded transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+                </div>
+                <div class="flex-1 overflow-auto p-6" id="sh-detail-content">
+                    <!-- JS Inject -->
+                </div>
+            </div>
+        </div>
+
+        <!-- ROCKET INPUT MODAL -->
+        <div id="rocket-input-modal" class="fixed inset-0 bg-gray-900/80 z-[9999] hidden flex flex-col items-center justify-center p-4 lg:p-10 backdrop-blur-sm transition-opacity">
+            <div class="bg-white rounded-xl shadow-2xl w-full max-w-6xl h-full max-h-[90vh] flex flex-col overflow-hidden border border-gray-200">
+                <div class="px-5 py-4 border-b border-pink-200 bg-pink-50 flex justify-between items-center shrink-0">
+                    <div class="flex items-center gap-3">
+                        <div class="bg-pink-600 text-white p-2 rounded-lg"><i data-lucide="rocket" class="w-5 h-5"></i></div>
+                        <div>
+                            <h3 class="font-bold text-lg text-gray-800 tracking-tight leading-none">Tetapkan Assy Rocket</h3>
+                            <span class="text-[10px] text-pink-700 font-bold bg-pink-100 px-2 py-0.5 rounded mt-1 inline-block">Validasi & Override STWC Database Bersih</span>
+                        </div>
+                    </div>
+                    <button onclick="closeRocketModal()" class="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+                </div>
+                
+                <div class="p-4 bg-white border-b border-gray-100 shrink-0 flex flex-col gap-3">
+                    <div class="flex flex-col gap-1 w-full">
+                        <div class="flex justify-between items-center mb-1">
+                            <label class="block text-[10px] font-bold text-gray-500 uppercase">List Assy & WP (Format: ASSY WP pemisah spasi)</label>
+                            <button onclick="openRocketSelectModal()" class="text-[10px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-3 py-1 border border-indigo-200 rounded font-bold shadow-sm transition flex items-center gap-1"><i data-lucide="list-plus" class="w-3 h-3"></i> Select Assy</button>
+                        </div>
+                        <textarea id="rocket-manual-input" class="w-full text-xs h-20 p-2 border border-gray-300 rounded focus:border-pink-500 outline-none shadow-sm" placeholder="Contoh Paste Excel atau ketik manual:\n12345678 A\n87654321 E"></textarea>
+                    </div>
+                    <button onclick="validateRocketData()" class="bg-gray-800 hover:bg-gray-900 text-white font-bold py-2 px-8 rounded shadow flex items-center justify-center gap-2 transition w-full md:w-auto self-center mt-2"><i data-lucide="check-circle-2" class="w-4 h-4"></i> Validasi List Manual</button>
+                </div>
+
+                <div class="flex-1 overflow-auto p-0 bg-gray-50">
+                    <table class="excel-table w-full whitespace-nowrap bg-white">
+                        <thead class="sticky top-0 shadow-sm z-10 bg-gray-100">
+                            <tr>
+                                <th class="w-12 text-center">AKSI</th>
+                                <th class="w-32 text-center">PRIORITAS (WAJIB)</th>
+                                <th class="w-20">PERIODE</th>
+                                <th class="text-left w-48">ASSY NO TERVALIDASI</th>
+                                <th class="w-24 text-center">WP</th>
+                                <th class="w-24 text-center">STATUS DB</th>
+                                <th class="w-20 text-center text-indigo-600">SISA QTY</th>
+                                <th class="w-32 text-center">REMARKS</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rocket-validation-tbody" class="divide-y divide-gray-100">
+                            <tr><td colspan="8" class="text-center p-8 text-gray-400 font-medium">Input list Assy + WP, lalu klik Validasi, atau gunakan tombol Select Assy.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="p-4 border-t border-gray-200 bg-white flex justify-between items-center shrink-0">
+                    <div id="rocket-validation-summary" class="text-[10px] font-bold text-gray-500">Total Validasi: 0 Assy</div>
+                    <div class="flex items-center gap-3">
+                        <div class="flex flex-col">
+                            <label class="text-[9px] font-bold text-gray-500 uppercase mb-0.5">Target STWC (Wajib)</label>
+                            <input type="date" id="rocket-stwc-input" class="text-xs border border-gray-300 px-2 py-1.5 rounded focus:border-pink-500 outline-none text-gray-700 bg-white shadow-sm">
+                        </div>
+                        <button onclick="saveRocketData()" class="bg-pink-600 hover:bg-pink-700 text-white font-bold py-2 px-6 rounded-lg shadow-md transition flex items-center gap-2 h-full mt-3.5"><i data-lucide="rocket" class="w-4 h-4"></i> Simpan ke Rocket</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ROCKET SELECT ASSY MODAL -->
+        <div id="rocket-select-modal" class="fixed inset-0 bg-gray-900/80 z-[10005] hidden flex items-center justify-center p-4 backdrop-blur-sm transition-opacity">
+            <div class="bg-white rounded-xl shadow-2xl w-full max-w-3xl h-full max-h-[85vh] flex flex-col overflow-hidden border border-gray-200">
+                <div class="px-5 py-4 border-b border-indigo-200 bg-indigo-50 flex justify-between items-center shrink-0">
+                    <h3 class="font-black text-indigo-900 flex items-center gap-2"><i data-lucide="list-plus" class="w-5 h-5"></i> Pilih Assy untuk Rocket</h3>
+                    <button onclick="closeRocketSelectModal()" class="text-indigo-400 hover:text-red-500 hover:bg-white p-1 rounded transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+                </div>
+                <div class="p-3 border-b border-gray-200 bg-white flex gap-3 shrink-0">
+                    <div class="flex-1 relative">
+                        <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i>
+                        <input type="text" id="rs-search-assy" placeholder="Cari Assy..." onkeyup="filterRocketSelect()" class="w-full text-xs pl-9 pr-3 py-2 border border-gray-300 rounded focus:border-indigo-500 outline-none shadow-sm">
+                    </div>
+                    <div class="flex-1 relative">
+                        <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i>
+                        <input type="text" id="rs-search-wp" placeholder="Cari WP..." onkeyup="filterRocketSelect()" class="w-full text-xs pl-9 pr-3 py-2 border border-gray-300 rounded focus:border-indigo-500 outline-none shadow-sm">
+                    </div>
+                </div>
+                <div class="flex-1 overflow-auto bg-gray-50/50 p-0">
+                    <table class="w-full text-[10px] whitespace-nowrap border-collapse text-left excel-table">
+                        <thead class="bg-gray-100 text-gray-600 sticky top-0 shadow-sm z-10 font-bold uppercase">
+                            <tr>
+                                <th class="p-2 w-24 text-center">Status</th>
+                                <th class="p-2">Assy No</th>
+                                <th class="p-2 w-24 text-center">WP</th>
+                                <th class="p-2 w-24 text-center">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rocket-select-tbody" class="divide-y divide-gray-200 bg-white">
+                            <!-- JS Injected -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </main>
+<!-- HISTORY DATE PICKER MODAL -->
+        <div id="history-picker-modal" class="fixed inset-0 bg-gray-900/80 z-[10005] hidden flex items-center justify-center p-4 backdrop-blur-sm transition-opacity">
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col scale-100 transition-transform border border-gray-200">
+                <div class="px-5 py-4 border-b border-amber-200 flex justify-between items-center bg-amber-50 shrink-0">
+                    <div>
+                        <h3 class="font-black text-amber-900 tracking-tight flex items-center gap-2"><i data-lucide="history" class="w-5 h-5 text-amber-600"></i> Arsip WIP Harian</h3>
+                        <p class="text-[10px] text-amber-700 mt-1 font-bold">Pilih tanggal untuk melihat snapshot masa lalu.</p>
+                    </div>
+                    <button onclick="document.getElementById('history-picker-modal').classList.add('hidden')" class="text-amber-400 hover:text-red-500 bg-white shadow-sm border border-amber-100 p-1.5 rounded transition"><i data-lucide="x" class="w-4 h-4"></i></button>
+                </div>
+                <div class="p-5 bg-white flex flex-col gap-4">
+                    <div>
+                        <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Pilih Tanggal Arsip</label>
+                        <select id="history-date-select" class="w-full text-xs font-bold border border-gray-300 rounded-lg p-2.5 outline-none bg-gray-50 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 cursor-pointer shadow-inner">
+                            <option value="" disabled selected>- Menyiapkan daftar tanggal -</option>
+                        </select>
+                    </div>
+                    <div class="bg-gray-50 border border-gray-200 p-3 rounded-lg flex gap-3 items-start">
+                        <i data-lucide="info" class="w-4 h-4 text-gray-400 shrink-0 mt-0.5"></i>
+                        <p class="text-[10px] text-gray-500 font-medium leading-relaxed">Arsip akan dibuka pada <strong>Tab Browser baru</strong> agar tidak mengganggu operasional sistem utama (Live Data).</p>
+                    </div>
+                </div>
+                <div class="p-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-2">
+                    <button onclick="document.getElementById('history-picker-modal').classList.add('hidden')" class="px-4 py-2 rounded-lg text-xs font-bold text-gray-500 hover:bg-gray-200 transition">Batal</button>
+                    <button onclick="executeOpenHistory()" class="bg-amber-600 hover:bg-amber-700 text-white px-6 py-2 rounded-lg shadow-md text-xs font-bold flex items-center gap-2 transition"><i data-lucide="external-link" class="w-4 h-4"></i> Buka Arsip</button>
+                </div>
+            </div>
+        </div>
+
+    <!-- CHAT / MANAJEMEN REVIEW MODAL -->
+    <div id="chat-modal" class="fixed inset-0 bg-gray-900/80 z-[10000] hidden flex flex-col items-center justify-center p-4 lg:p-8 backdrop-blur-sm transition-opacity">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-6xl h-full max-h-[85vh] flex flex-col overflow-hidden border border-gray-200">
+            <!-- Header -->
+            <div class="px-6 py-4 border-b border-sky-100 flex justify-between items-center bg-gradient-to-r from-sky-50 to-white shrink-0">
+                <div class="flex items-center gap-3">
+                    <div class="bg-sky-500 text-white p-2 rounded-xl shadow-sm"><i data-lucide="messages-square" class="w-5 h-5"></i></div>
+                    <div>
+                        <h3 class="font-black text-lg text-gray-800 tracking-tight leading-none">Manajemen Review & Komunikasi</h3>
+                        <span class="text-[10px] text-sky-600 font-bold mt-1 inline-block">Log Diskusi Produksi dan Eksekutif WIP</span>
+                    </div>
+                </div>
+                <button onclick="closeChatModal()" class="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            
+            <!-- Body: Side by Side -->
+            <div class="flex flex-col lg:flex-row flex-1 overflow-hidden">
+                <!-- Left: Chat Log -->
+                <div class="flex-[2] bg-gray-50/50 flex flex-col border-r border-gray-100 relative">
+                    <div id="chat-log-container" class="flex-1 overflow-y-auto p-6 space-y-4">
+                        <div class="text-center text-gray-400 text-xs font-medium mt-10">Memuat percakapan...</div>
+                    </div>
+                </div>
+                
+                <!-- Right: Input Form -->
+                <div class="flex-[1] bg-white flex flex-col p-6 shrink-0 relative min-w-[300px]">
+                    <h4 class="text-xs font-black text-gray-800 mb-4 uppercase tracking-wider flex items-center gap-2"><i data-lucide="pen-line" class="w-4 h-4 text-sky-500"></i> Tulis Pesan Baru</h4>
+                    
+                    <div class="flex-1 flex flex-col gap-4">
+                        <div class="flex flex-col gap-1.5">
+                            <label class="text-[10px] font-bold text-gray-500 uppercase">Nama Pengirim (Signature)</label>
+                            <input type="text" id="chat-sender-input" placeholder="Contoh: Budi (PP) / Manager" class="w-full text-xs border border-gray-300 px-3 py-2.5 rounded-lg focus:border-sky-500 focus:ring-1 focus:ring-sky-500 outline-none transition bg-gray-50 focus:bg-white font-bold text-gray-800 shadow-inner">
+                        </div>
+                        <div class="flex flex-col gap-1.5 flex-1">
+                            <label class="text-[10px] font-bold text-gray-500 uppercase">Isi Pesan</label>
+                            <textarea id="chat-message-input" placeholder="Ketik catatan atau review di sini... (Tekan Ctrl+Enter untuk kirim, Enter untuk baris baru)" onkeydown="if(event.key === 'Enter' && event.ctrlKey) { event.preventDefault(); sendChatMessage(); }" class="w-full text-xs border border-gray-300 px-3 py-2.5 rounded-lg focus:border-sky-500 focus:ring-1 focus:ring-sky-500 outline-none transition bg-gray-50 focus:bg-white resize-none flex-1 shadow-inner leading-relaxed"></textarea>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4 pt-4 border-t border-gray-100">
+                        <button onclick="sendChatMessage()" id="btn-send-chat" class="w-full bg-sky-600 hover:bg-sky-700 text-white font-bold py-3.5 px-4 rounded-xl shadow-md transition flex items-center justify-center gap-2">
+                            <i data-lucide="send" class="w-4 h-4"></i> Kirim Pesan
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL BATCH INPUT SH -->
+    <div id="sh-batch-input-modal" class="fixed inset-0 bg-gray-900/80 z-[9999] hidden flex flex-col items-center justify-center p-4 lg:p-10 backdrop-blur-sm transition-opacity">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-6xl h-full max-h-[90vh] flex flex-col overflow-hidden border border-gray-200">
+            <div class="px-5 py-4 border-b border-indigo-200 flex justify-between items-center bg-indigo-50 shrink-0">
+                <div class="flex items-center gap-3">
+                    <div class="bg-indigo-600 text-white p-2 rounded-lg"><i data-lucide="layers" class="w-5 h-5"></i></div>
+                    <div>
+                        <h3 class="font-bold text-lg text-gray-800 tracking-tight leading-none">Batch Input Shortage Material</h3>
+                        <span class="text-[10px] text-indigo-700 font-bold bg-indigo-100 px-2 py-0.5 rounded mt-1 inline-block">Upload Where Used (Part No, Assy No, Usage)</span>
+                    </div>
+                </div>
+                <button onclick="closeBatchShModal()" class="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            
+            <div class="p-4 bg-white border-b border-gray-100 shrink-0 flex flex-col md:flex-row gap-4">
+                <div class="flex-1 border border-gray-200 rounded-lg p-4 bg-gray-50 flex flex-col justify-center items-center text-center">
+                    <div class="mb-3">
+                        <label class="block text-sm font-black text-indigo-700 mb-1"><i data-lucide="file-spreadsheet" class="w-5 h-5 inline"></i> 1. Import Where Used (Batch)</label>
+                        <p class="text-[10px] text-gray-500 max-w-sm mx-auto">Excel wajib memiliki kolom <strong>PART NO</strong>, <strong>ASSY NO</strong>, dan <strong>USAGE/QTY</strong>.</p>
+                    </div>
+                    <input type="file" id="sh-batch-excel" accept=".xlsx, .xls, .csv" class="text-xs text-gray-600 file:py-2 file:px-4 file:rounded-lg file:border-0 file:font-black file:bg-indigo-100 file:text-indigo-700 hover:file:bg-indigo-200 cursor-pointer shadow-sm w-full md:w-auto" onclick="this.value=null;" onchange="handleBatchShExcel(event)">
+                </div>
+
+                <div class="flex-[1.5] flex flex-col gap-2">
+                    <label class="block text-[10px] font-bold text-gray-500 uppercase"><i data-lucide="list-checks" class="w-3 h-3 inline"></i> 2. Form Penetapan Part (Tambah Kategori & Periode)</label>
+                    <div class="flex gap-2 items-center">
+                        <select id="bsh-cat" class="text-xs border border-gray-300 px-2 py-2 rounded focus:border-indigo-500 outline-none w-1/4">
+                            <option value="Terminal">Terminal</option><option value="Accessories">Accessories</option><option value="Wire">Wire</option><option value="Tube">Tube</option><option value="Lain-lain">Lain-lain</option>
+                        </select>
+                        <input type="text" id="bsh-part" placeholder="Part No / Item ID..." class="text-xs border border-gray-300 px-2 py-2 rounded focus:border-indigo-500 outline-none w-1/4 font-bold text-indigo-700">
+                        <select id="bsh-start" class="text-xs border border-gray-300 px-2 py-2 rounded focus:border-indigo-500 outline-none w-1/4"></select>
+                        <select id="bsh-end" class="text-xs border border-gray-300 px-2 py-2 rounded focus:border-indigo-500 outline-none w-1/4"></select>
+                        <button onclick="addBatchShPart()" class="bg-gray-800 text-white p-2 rounded shadow hover:bg-gray-900 transition"><i data-lucide="plus" class="w-4 h-4"></i></button>
+                    </div>
+                    <div class="flex-1 overflow-auto border border-gray-200 rounded mt-1 bg-white max-h-24">
+                        <table class="w-full text-[10px] text-left"><tbody id="bsh-added-tbody"></tbody></table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex justify-center bg-gray-50 py-2 border-b border-gray-100 shrink-0">
+                <button onclick="validateBatchSh()" id="btn-val-batch-sh" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-8 rounded shadow-md flex items-center justify-center gap-2 transition w-full md:w-auto"><i data-lucide="check-circle-2" class="w-4 h-4"></i> 3. Validasi & Kalkulasi Massal</button>
+            </div>
+
+            <div class="flex-1 overflow-auto p-0 bg-gray-50">
+                <table class="excel-table w-full whitespace-nowrap bg-white">
+                    <thead class="sticky top-0 shadow-sm z-10 bg-gray-100">
+                        <tr><th class="w-48 text-left">PART NO</th><th class="w-20">KATEGORI</th><th class="w-32">RENTANG WPP</th><th class="w-20 text-center">ASSY AKTIF</th><th class="w-24 text-right text-pink-700">NEED MATERIAL</th><th class="text-left text-red-600">TOTAL CCT</th></tr>
+                    </thead>
+                    <tbody id="bsh-validation-tbody">
+                        <tr><td colspan="6" class="text-center p-8 text-gray-400 font-medium">Lengkapi Form dan Upload Where Used, lalu klik Validasi.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="p-4 border-t border-gray-200 bg-white flex justify-between items-center shrink-0">
+                <div id="bsh-validation-summary" class="text-[10px] font-bold text-gray-500">Menunggu Validasi...</div>
+                <button onclick="confirmBatchSh()" id="btn-save-batch-sh" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-6 rounded-lg shadow-md transition flex items-center gap-2"><i data-lucide="upload-cloud" class="w-4 h-4"></i> Simpan Batch SH</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL BATCH CONFIRM KEDATANGAN -->
+    <div id="sh-batch-confirm-modal" class="fixed inset-0 bg-gray-900/80 z-[9999] hidden flex flex-col items-center justify-center p-4 lg:p-10 backdrop-blur-sm transition-opacity">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl h-full max-h-[85vh] flex flex-col overflow-hidden border border-gray-200">
+            <div class="px-5 py-4 border-b border-sky-200 flex justify-between items-center bg-sky-50 shrink-0">
+                <div class="flex items-center gap-3">
+                    <div class="bg-sky-600 text-white p-2 rounded-lg"><i data-lucide="check-square" class="w-5 h-5"></i></div>
+                    <div>
+                        <h3 class="font-bold text-lg text-gray-800 tracking-tight leading-none">Batch Konfirmasi Kedatangan SH</h3>
+                        <span class="text-[10px] text-sky-700 font-bold bg-sky-100 px-2 py-0.5 rounded mt-1 inline-block">Paste list Material yang datang sekaligus</span>
+                    </div>
+                </div>
+                <button onclick="closeBatchConfirmModal()" class="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            
+            <div class="p-4 bg-white border-b border-gray-100 shrink-0 flex flex-col gap-3">
+                <label class="block text-[10px] font-bold text-gray-500 uppercase">Paste List Nama Part / Item ID (Pemisah Enter / Baris Baru)</label>
+                <textarea id="bc-manual-input" class="w-full text-xs h-24 p-3 border border-gray-300 rounded focus:border-sky-500 outline-none shadow-inner" placeholder="Terminal A\nTerminal B..."></textarea>
+                <button onclick="validateBatchConfirm()" id="btn-val-bc" class="bg-gray-800 hover:bg-gray-900 text-white font-bold py-2 px-8 rounded shadow flex items-center justify-center gap-2 transition w-full md:w-auto self-center mt-1"><i data-lucide="search" class="w-4 h-4"></i> Cari Kecocokan di Sistem</button>
+            </div>
+
+            <div class="flex-1 overflow-auto p-0 bg-gray-50">
+                <table class="excel-table w-full whitespace-nowrap bg-white">
+                    <thead class="sticky top-0 shadow-sm z-10 bg-gray-100">
+                        <tr><th class="w-12 text-center">AKSI</th><th class="w-1/2 text-left">TEKS YANG DIPASTE</th><th class="w-1/2 text-left">DITEMUKAN DI SISTEM (Aktif SH)</th></tr>
+                    </thead>
+                    <tbody id="bc-validation-tbody">
+                        <tr><td colspan="3" class="text-center p-8 text-gray-400 font-medium">Paste data material yang datang lalu klik Validasi.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="p-4 border-t border-gray-200 bg-white flex justify-end gap-3 shrink-0 items-center">
+                <div class="flex flex-col">
+                    <label class="text-[9px] font-bold text-gray-500 uppercase mb-0.5">Tanggal Aktual Kedatangan</label>
+                    <input type="date" id="bc-date-input" class="text-xs border border-gray-300 px-2 py-1.5 rounded focus:border-sky-500 outline-none text-gray-700 bg-white shadow-sm">
+                </div>
+                <button onclick="executeBatchConfirm()" id="btn-save-bc" class="bg-sky-600 hover:bg-sky-700 text-white font-bold py-2 px-6 rounded-lg shadow-md transition flex items-center gap-2 h-full mt-3.5"><i data-lucide="save" class="w-4 h-4"></i> Konfirmasi Kedatangan Semua</button>
+            </div>
+        </div>
+    </div>
+
+
+<!-- MODAL BATCH REMARKS SH (INLINE EDITABLE) -->
+    <div id="sh-batch-remarks-modal" class="fixed inset-0 bg-gray-900/80 z-[10005] hidden flex flex-col items-center justify-center p-4 lg:p-8 backdrop-blur-sm transition-opacity">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-6xl h-full max-h-[88vh] flex flex-col overflow-hidden border border-violet-200">
+            <div class="px-6 py-4 border-b border-violet-200 flex justify-between items-center bg-violet-50 shrink-0">
+                <div class="flex items-center gap-3">
+                    <div class="bg-violet-600 text-white p-2 rounded-lg shadow-sm"><i data-lucide="message-square-plus" class="w-5 h-5"></i></div>
+                    <div>
+                        <h3 class="font-black text-lg text-violet-950 tracking-tight leading-none">Batch Remarks & Update SH (OPEN)</h3>
+                        <span class="text-[10px] text-violet-700 font-bold bg-violet-100 px-2 py-0.5 rounded mt-1 inline-block">Edit inline Remarks, Konfirmasi MCL & Estimasi Kedatangan</span>
+                    </div>
+                </div>
+                <button onclick="closeBatchRemarksModal()" class="p-2 text-violet-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+
+            <div class="px-6 py-2.5 bg-gray-50 border-b border-gray-200 flex flex-wrap justify-between items-center gap-2 shrink-0">
+                <span id="brm-open-count" class="text-[11px] font-bold text-violet-800 bg-violet-100 px-3 py-1 rounded-full">0 Material OPEN</span>
+                <input type="text" id="brm-search-input" onkeyup="filterBatchRemarksRows()" placeholder="Cari Part Name / Item ID / Kategori..." class="text-xs border border-gray-300 rounded-lg px-3 py-1.5 w-full sm:w-72 outline-none focus:border-violet-500 bg-white">
+            </div>
+
+            <div class="flex-1 overflow-auto p-0 bg-white">
+                <table class="excel-table w-full whitespace-nowrap">
+                    <thead class="sticky top-0 z-10 bg-gray-100 shadow-sm">
+                        <tr>
+                            <th class="text-left w-56">MATERIAL / ITEM ID</th>
+                            <th class="w-24">KATEGORI</th>
+                            <th class="w-20 text-right">TERDAMPAK</th>
+                            <th class="w-40">KONFIRMASI MCL</th>
+                            <th class="w-36">ESTIMASI DATANG</th>
+                            <th class="text-left min-w-[260px]">REMARKS BARU (PASTE / KETIK)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="brm-tbody" class="divide-y divide-gray-100"></tbody>
+                </table>
+            </div>
+
+            <div class="p-4 border-t border-gray-200 bg-gray-50 flex justify-end gap-3 shrink-0">
+                <button onclick="closeBatchRemarksModal()" class="px-4 py-2 rounded-lg text-xs font-bold text-gray-600 hover:bg-gray-200 transition">Batal</button>
+                <button onclick="saveBatchRemarks()" id="btn-save-batch-remarks" class="bg-violet-600 hover:bg-violet-700 text-white font-bold py-2 px-6 rounded-lg shadow-md transition flex items-center gap-2 text-xs">
+                    <i data-lucide="save" class="w-4 h-4"></i> Simpan Remarks
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Separated Pure JavaScript Modules (No Frameworks) -->
+    <script src="js/themes.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

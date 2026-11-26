@@ -1,0 +1,468 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
+
+/* =========================================================
+   E-WIP BASE STRUCTURAL STYLES (PURE CSS — FRAMEWORK FREE)
+   ========================================================= */
+:root {
+    --app-bg: #f8fafc;
+    --app-bg-pattern: none;
+    --app-bg-size: auto;
+    --surface: #ffffff;
+    --surface-2: #f8fafc;
+    --surface-inset: #f1f5f9;
+    --surface-hover: #f1f5f9;
+    --border-subtle: #e2e8f0;
+    --border-strong: #cbd5e1;
+    --text-primary: #0f172a;
+    --text-secondary: #334155;
+    --text-muted: #64748b;
+    --accent-main: #d97706;
+    --accent-bright: #f59e0b;
+    --accent-soft-bg: #fef3c7;
+    --accent-on: #ffffff;
+    --shadow-card: 0 4px 12px -2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
+    --scroll-track: #f1f5f9;
+    --scroll-thumb: #cbd5e1;
+    --scroll-thumb-hover: #94a3b8;
+}
+
+body.ewip-app {
+    background-color: var(--app-bg);
+    background-image: var(--app-bg-pattern);
+    background-size: var(--app-bg-size);
+    color: var(--text-primary);
+    padding: 0;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition: background-color 0.38s cubic-bezier(0.22, 1, 0.36, 1), color 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* =========================================================
+   SMOOTH THEME TRANSITION ENGINE (View Transitions + CSS Fallback)
+   ========================================================= */
+::view-transition-old(root),
+::view-transition-new(root) {
+    animation-duration: 0.42s;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    mix-blend-mode: normal;
+}
+
+html.ewip-vt-radial::view-transition-old(root),
+html.ewip-vt-radial::view-transition-new(root) {
+    animation: none;
+    mix-blend-mode: normal;
+}
+
+html.ewip-vt-radial::view-transition-old(root) {
+    z-index: 1;
+}
+
+html.ewip-vt-radial::view-transition-new(root) {
+    z-index: 9999;
+}
+
+html.ewip-theme-transitioning,
+html.ewip-theme-transitioning body.ewip-app,
+html.ewip-theme-transitioning .ewip-navbar,
+html.ewip-theme-transitioning #global-threshold-bar,
+html.ewip-theme-transitioning .bento-box,
+html.ewip-theme-transitioning .ewip-kpi-hero,
+html.ewip-theme-transitioning .ewip-kpi-tile,
+html.ewip-theme-transitioning .ewip-nav-pill-bar,
+html.ewip-theme-transitioning .ewip-cat-bar,
+html.ewip-theme-transitioning .ewip-subtab-bar,
+html.ewip-theme-transitioning .ewip-fifo-daily-scroll,
+html.ewip-theme-transitioning .ewip-fifo-daily-table th,
+html.ewip-theme-transitioning .ewip-fifo-daily-table td,
+html.ewip-theme-transitioning .excel-table th,
+html.ewip-theme-transitioning .excel-table td,
+html.ewip-theme-transitioning [class*="ewip-head-"],
+html.ewip-theme-transitioning [class*="ewip-mid-kpi-"],
+html.ewip-theme-transitioning [class*="ewip-btn-"],
+html.ewip-theme-transitioning .ewip-nav-icon-btn,
+html.ewip-theme-transitioning .ewip-threshold-chip,
+html.ewip-theme-transitioning .ewip-trend-select,
+html.ewip-theme-transitioning button,
+html.ewip-theme-transitioning input,
+html.ewip-theme-transitioning select,
+html.ewip-theme-transitioning #theme-picker-popover {
+    transition:
+        background-color 0.4s cubic-bezier(0.22, 1, 0.36, 1),
+        color 0.36s cubic-bezier(0.22, 1, 0.36, 1),
+        border-color 0.38s cubic-bezier(0.22, 1, 0.36, 1),
+        box-shadow 0.4s cubic-bezier(0.22, 1, 0.36, 1),
+        backdrop-filter 0.4s cubic-bezier(0.22, 1, 0.36, 1),
+        border-radius 0.32s cubic-bezier(0.22, 1, 0.36, 1) !important;
+}
+
+html.ewip-theme-transitioning canvas {
+    animation: ewip-canvas-settle 0.36s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes ewip-canvas-settle {
+    0% { opacity: 0.72; }
+    100% { opacity: 1; }
+}
+
+.font-batik-display {
+    font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+    letter-spacing: 0.02em;
+}
+
+.tabular-nums {
+    font-variant-numeric: tabular-nums;
+}
+
+/* High-Legibility Technical Monospace for KPI Numbers & Assy Codes */
+body.ewip-app [id^="ov-master-"],
+body.ewip-app [id^="ov-kpi-"],
+body.ewip-app [id$="-count"],
+body.ewip-app .assy-cell,
+body.ewip-app .rs-assy,
+body.ewip-app .ps-assy,
+body.ewip-app #control-tbody td,
+body.ewip-app #sh-table-body td:nth-child(1),
+body.ewip-app #sh-table-body td:nth-child(6),
+body.ewip-app #paylater-table-body td:nth-child(4),
+body.ewip-app #paylater-table-body td:nth-child(5),
+body.ewip-app #paylater-table-body td:nth-child(6),
+body.ewip-app #paylater-table-body td:nth-child(7),
+body.ewip-app #rocket-table-body td:nth-child(4),
+body.ewip-app #rocket-table-body td:nth-child(5),
+body.ewip-app #rocket-table-body td:nth-child(6),
+body.ewip-app #rocket-table-body td:nth-child(7) {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+}
+
+/* =========================================================
+   SHARED CARDS, TABLES, DROP ZONES & TOASTS
+   ========================================================= */
+.bento-box {
+    position: relative;
+    background: var(--surface);
+    border-radius: 0.75rem;
+    border: 1px solid var(--border-subtle);
+    box-shadow: var(--shadow-card);
+    color: var(--text-primary);
+    transition: border-color 0.25s ease, box-shadow 0.25s ease, background-color 0.25s ease, transform 0.2s ease;
+}
+
+.excel-table {
+    border-collapse: separate;
+    border-spacing: 0;
+    width: 100%;
+    font-family: 'JetBrains Mono', 'Plus Jakarta Sans', monospace;
+    font-variant-numeric: tabular-nums;
+}
+
+.excel-table th,
+.excel-table td {
+    border-right: 1px solid var(--border-subtle);
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 0.34rem 0.55rem;
+    font-size: 11px;
+}
+
+.excel-table th {
+    text-align: center;
+    font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    border-top: 1px solid var(--border-strong);
+    padding: 0.48rem 0.55rem;
+    font-size: 11px;
+}
+
+.excel-table td:first-child,
+.excel-table th:first-child {
+    border-left: 1px solid var(--border-subtle);
+}
+
+.excel-table .row-group-start td {
+    border-top: 1.5px solid var(--border-strong);
+}
+
+.excel-table .footer-row td {
+    font-weight: 800;
+}
+
+.drop-zone {
+    border: 2px dashed var(--border-strong);
+    border-radius: 1rem;
+    padding: 2rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    background: var(--surface-inset);
+}
+
+.drop-zone:hover,
+.drop-zone.dragover {
+    border-color: var(--accent-main);
+    background: var(--surface-hover);
+    transform: translateY(-1px);
+}
+
+/* Loading Progress Shine */
+#loading-overlay {
+    backdrop-filter: blur(12px);
+    transition: opacity 0.5s ease;
+}
+
+.progress-bar-fill {
+    transition: width 0.3s ease-out;
+}
+
+@keyframes shine-progress {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(200%); }
+}
+
+.animate-shine {
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.65), transparent);
+    animation: shine-progress 1.5s infinite linear;
+}
+
+/* Toast Notifications */
+#toast-container {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 99999;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.toast {
+    padding: 12px 20px;
+    border-radius: 10px;
+    color: #fff;
+    font-weight: 600;
+    font-size: 12px;
+    box-shadow: 0 14px 28px -6px rgba(0, 0, 0, 0.35);
+    opacity: 0;
+    transform: translateY(15px);
+    transition: all 0.3s ease;
+    backdrop-filter: blur(8px);
+}
+
+.toast.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* Scrollbar Polish */
+::-webkit-scrollbar {
+    width: 7px;
+    height: 7px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--scroll-track);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--scroll-thumb);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--scroll-thumb-hover);
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+    display: none;
+}
+
+.scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+
+/* =========================================================
+   THEME SWITCHER BUTTON & POPOVER
+   ========================================================= */
+#theme-picker-popover {
+    position: fixed;
+    top: 58px;
+    right: 16px;
+    width: 324px;
+    max-width: calc(100vw - 24px);
+    z-index: 10020;
+    border-radius: 1rem;
+    background: var(--surface);
+    border: 1.5px solid var(--border-strong);
+    box-shadow: 0 22px 48px -10px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+    transform-origin: top right;
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+    transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#theme-picker-popover.is-open {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+}
+
+#theme-picker-popover.hidden {
+    display: none;
+}
+
+.theme-option-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    text-align: left;
+    padding: 10px 12px;
+    border-radius: 0.75rem;
+    border: 1.5px solid transparent;
+    background: var(--surface-inset);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: all 0.18s ease;
+}
+
+.theme-option-card:hover {
+    border-color: var(--accent-main);
+    background: var(--surface-hover);
+    transform: translateY(-1px);
+}
+
+.theme-option-card.is-active {
+    border-color: var(--accent-main);
+    box-shadow: 0 0 0 2px rgba(212, 168, 67, 0.25);
+}
+
+.theme-swatch-stack {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 38px;
+    height: 38px;
+    border-radius: 0.6rem;
+    overflow: hidden;
+    flex-shrink: 0;
+    border: 1px solid rgba(128, 128, 128, 0.35);
+    box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.15);
+}
+
+.theme-mode-tag {
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 2px 6px;
+    border-radius: 9999px;
+    border: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+}
+
+/* =========================================================
+   OVERVIEW SUB-MENU & TREND FIFO DAILY HORIZONTAL TABLE
+   ========================================================= */
+.ewip-subtab-bar {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px;
+    border-radius: 0.6rem;
+    background: var(--surface-inset);
+    border: 1px solid var(--border-subtle);
+}
+
+.ewip-fifo-daily-scroll {
+    --fifo-sticky-w: 154px;
+    --fifo-day-col-w: 118px;
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-behavior: smooth;
+    border: 1px solid var(--border-subtle);
+    border-radius: 0.65rem;
+    background: var(--surface);
+}
+
+.ewip-fifo-daily-table {
+    border-collapse: separate;
+    border-spacing: 0;
+    width: max-content;
+    min-width: 100%;
+    table-layout: fixed;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+}
+
+.ewip-fifo-daily-table th,
+.ewip-fifo-daily-table td {
+    border-right: 1px solid var(--border-subtle);
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 0.55rem 0.65rem;
+    text-align: right;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.ewip-fifo-daily-table tr:last-child td {
+    border-bottom: none;
+}
+
+.ewip-fifo-daily-table th.ewip-fifo-sticky-col,
+.ewip-fifo-daily-table td.ewip-fifo-sticky-col {
+    position: sticky;
+    left: 0;
+    z-index: 12;
+    width: var(--fifo-sticky-w);
+    min-width: var(--fifo-sticky-w);
+    max-width: var(--fifo-sticky-w);
+    text-align: left;
+    font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+    border-right: 2px solid var(--border-strong);
+    background: var(--surface-2);
+    box-shadow: 4px 0 10px -4px rgba(0, 0, 0, 0.14);
+}
+
+.ewip-fifo-daily-table th.ewip-fifo-sticky-col {
+    z-index: 16;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 10px;
+    font-weight: 800;
+}
+
+.ewip-fifo-daily-table th.ewip-fifo-date-col,
+.ewip-fifo-daily-table td.ewip-fifo-date-col {
+    width: var(--fifo-day-col-w);
+    min-width: var(--fifo-day-col-w);
+    max-width: var(--fifo-day-col-w);
+}
+
+.ewip-fifo-daily-table th.ewip-fifo-date-col {
+    text-align: center;
+    background: var(--surface-2);
+    color: var(--text-secondary);
+    font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+    padding: 0.5rem 0.45rem;
+}
+
+.ewip-fifo-daily-table td.ewip-fifo-zero {
+    opacity: 0.45;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .animate-shine, .animate-pulse {
+        animation: none !important;
+    }
+    .ewip-fifo-daily-scroll {
+        scroll-behavior: auto;
+    }
+    ::view-transition-old(root),
+    ::view-transition-new(root),
+    html.ewip-theme-transitioning * {
+        animation: none !important;
+        transition: none !important;
+    }
+}
