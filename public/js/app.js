@@ -24,12 +24,69 @@ let lastRealtimeToastAt = 0;
 let lastConsolidatedSyncAt = 0;
 let isApplyingRealtimeSync = false;
 
-if(firebaseConfig.apiKey && firebaseConfig.apiKey !== "MASUKKAN_API_KEY_ANDA_DI_SINI") {
-    firebase.initializeApp(firebaseConfig);
-    db = firebase.firestore();
-    db.settings({ experimentalForceLongPolling: true });
-    isFirebaseActive = true;
+function initFirebaseEngine() {
+    if (isFirebaseActive && db) return true;
+    if (!firebaseConfig.apiKey || firebaseConfig.apiKey === "MASUKKAN_API_KEY_ANDA_DI_SINI") return false;
+    if (typeof window.firebase === 'undefined' || typeof window.firebase.initializeApp !== 'function' || typeof window.firebase.firestore !== 'function') {
+        return false;
+    }
+    try {
+        if (!window.firebase.apps || window.firebase.apps.length === 0) {
+            window.firebase.initializeApp(firebaseConfig);
+        }
+        db = window.firebase.firestore();
+        try {
+            db.settings({ experimentalForceLongPolling: true });
+        } catch (settingsErr) {}
+        isFirebaseActive = true;
+        return true;
+    } catch (initErr) {
+        console.warn('Firebase init warning:', initErr);
+        return false;
+    }
 }
+
+function loadExternalScript(src) {
+    return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = src;
+        script.async = true;
+        script.onload = () => resolve(true);
+        script.onerror = () => reject(new Error('Failed to load ' + src));
+        document.head.appendChild(script);
+    });
+}
+
+async function ensureFirebaseSDKLoaded() {
+    if (initFirebaseEngine()) return true;
+    const cdnMirrors = [
+        [
+            'https://cdn.jsdelivr.net/npm/firebase@10.8.0/firebase-app-compat.js',
+            'https://cdn.jsdelivr.net/npm/firebase@10.8.0/firebase-firestore-compat.js'
+        ],
+        [
+            'https://unpkg.com/firebase@10.8.0/firebase-app-compat.js',
+            'https://unpkg.com/firebase@10.8.0/firebase-firestore-compat.js'
+        ]
+    ];
+    for (const [appUrl, firestoreUrl] of cdnMirrors) {
+        try {
+            if (typeof window.firebase === 'undefined' || typeof window.firebase.initializeApp !== 'function') {
+                await loadExternalScript(appUrl);
+            }
+            if (typeof window.firebase !== 'undefined' && typeof window.firebase.firestore !== 'function') {
+                await loadExternalScript(firestoreUrl);
+            }
+            if (initFirebaseEngine()) return true;
+        } catch (err) {
+            console.warn('Firebase CDN mirror failed:', err.message);
+        }
+    }
+    return initFirebaseEngine();
+}
+
+// Attempt immediate initialization if primary CDN script already loaded
+initFirebaseEngine();
 
 async function saveDB(key, data, progressCb) {
     if (!isFirebaseActive) return;
@@ -176,7 +233,7 @@ function scheduleRealtimeUiRefresh() {
                 renderReportWIP();
             } else if (activeTab === 'control') {
                 if (typeof renderControlPeriodeTabs === 'function') renderControlPeriodeTabs();
-                if (typeof renderControlOutstanding === 'function') renderControlOutstanding();
+                if (typeof renderControlOutstanding === 'function') renderControlOutstanding(true);
             } else if (activeTab === 'sh' && typeof renderShMaterials === 'function') {
                 renderShMaterials();
             } else if (activeTab === 'paylater' && typeof renderPaylaterTable === 'function') {
@@ -251,7 +308,7 @@ async function applyRemoteKeySync(key) {
             masterHeadersSet.clear();
             masterHeaders.forEach(h => masterHeadersSet.add(h));
         } else if (key === 'last_wip_date') {
-            // Tracked for day transitions across clients
+            safeSetText('info-last-sync', val ? val : '-');
         }
 
         realtimePendingKeys.add(key);
@@ -401,24 +458,293 @@ window.logoutAuth = function() {
     showToast('Sesi diakhiri.', 'info');
 };
 
-window.lastDuckRainTime = 0;
-window.triggerDuckRain = function() {
-    // Mencegah spam jika sedang hujan bebek
-    if(document.querySelectorAll('.duck-rain').length > 0) return;
-    
-    for(let i = 0; i < 40; i++) {
-        let duck = document.createElement('div');
-        duck.innerText = '🍗';
-        duck.className = 'duck-rain';
-        duck.style.left = (Math.random() * 100) + 'vw';
-        let duration = Math.random() * 2 + 1.5; // Jatuh dalam waktu 1.5s sampai 3.5s
-        duck.style.animationDuration = duration + 's';
-        duck.style.fontSize = (Math.random() * 1.5 + 1.5) + 'rem';
-        document.body.appendChild(duck);
-        
-        setTimeout(() => duck.remove(), duration * 1000); // Bersihkan setelah selesai jatuh
+window.lastDuckParadeTime = 0;
+
+function getDuckParadeThemeStyle(themeId) {
+    const styles = {
+        'default': {
+            boardStyle: 'background:linear-gradient(180deg,#ffffff,#f0f9ff);color:#0f172a;border:2px solid #0ea5e9;border-radius:10px;',
+            pctColor: '#0284c7',
+            poleStyle: 'background:linear-gradient(90deg,#64748b,#cbd5e1,#475569);',
+            finialStyle: 'background:#0ea5e9;border:1.5px solid #ffffff;',
+            scarf: '#0ea5e9',
+            accessory: 'hardhat-blue',
+            winTitlebar: false
+        },
+        'royal-batik': {
+            boardStyle: 'background:linear-gradient(135deg,#24140a,#3b2211);color:#fae29e;border:2px solid #e0b85c;border-radius:10px;box-shadow:inset 0 0 0 2px rgba(224,184,92,0.28),0 8px 18px rgba(0,0,0,0.5);',
+            pctColor: '#fde68a',
+            poleStyle: 'background:linear-gradient(90deg,#5c3618,#b98432,#4a2a12);',
+            finialStyle: 'background:radial-gradient(circle,#fff2bd,#d4a843);border:1px solid #8a6216;',
+            scarf: '#c9972e',
+            accessory: 'blangkon-dark',
+            winTitlebar: false
+        },
+        'batik-ivory': {
+            boardStyle: 'background:linear-gradient(135deg,#fffdf7,#f6ebd4);color:#4a2b13;border:2px solid #b5842b;border-radius:10px;',
+            pctColor: '#8b4513',
+            poleStyle: 'background:linear-gradient(90deg,#6e411d,#c89643,#543014);',
+            finialStyle: 'background:#d4a23e;border:1.5px solid #6e411d;',
+            scarf: '#8b5a2b',
+            accessory: 'blangkon-ivory',
+            winTitlebar: false
+        },
+        'industrial-dark': {
+            boardStyle: 'background:linear-gradient(180deg,#0f172a,#1e293b);color:#e2e8f0;border:2px solid #38bdf8;border-radius:6px;box-shadow:0 0 14px rgba(56,189,248,0.3);',
+            pctColor: '#38bdf8',
+            poleStyle: 'background:repeating-linear-gradient(180deg,#475569 0 6px,#94a3b8 6px 8px);',
+            finialStyle: 'background:#38bdf8;border:1.5px solid #0f172a;',
+            scarf: '#38bdf8',
+            accessory: 'hardhat-yellow',
+            winTitlebar: false
+        },
+        'emerald-nusantara': {
+            boardStyle: 'background:linear-gradient(135deg,#09241b,#144434);color:#f4d87c;border:2px solid #dfb74c;border-radius:10px;',
+            pctColor: '#6ee7b7',
+            poleStyle: 'background:linear-gradient(90deg,#0f3d2e,#dfb74c,#0a291f);',
+            finialStyle: 'background:#f4d87c;border:1.5px solid #0a291f;',
+            scarf: '#10b981',
+            accessory: 'songkok-emerald',
+            winTitlebar: false
+        },
+        'macos-glass': {
+            boardStyle: 'background:rgba(255,255,255,0.84);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);color:#0f172a;border:1.5px solid rgba(255,255,255,0.92);border-radius:14px;box-shadow:0 10px 26px -6px rgba(15,23,42,0.22);',
+            pctColor: '#007aff',
+            poleStyle: 'background:linear-gradient(90deg,#94a3b8,#f1f5f9,#64748b);',
+            finialStyle: 'background:linear-gradient(135deg,#ffffff,#cbd5e1);border:1px solid #94a3b8;',
+            scarf: '#007aff',
+            accessory: 'macos-headphones',
+            winTitlebar: false
+        },
+        'windows-98': {
+            boardStyle: 'background:#c0c0c0;color:#000000;border-top:2px solid #ffffff;border-left:2px solid #ffffff;border-right:2px solid #404040;border-bottom:2px solid #404040;border-radius:0px;padding:0;overflow:hidden;box-shadow:2px 2px 0 #000000;',
+            pctColor: '#000080',
+            poleStyle: 'background:linear-gradient(90deg,#dfdfdf,#808080,#404040);border-radius:0;',
+            finialStyle: 'background:#c0c0c0;border:1.5px solid #404040;border-radius:0;',
+            scarf: '#000080',
+            accessory: 'win98-shades',
+            winTitlebar: true
+        },
+        'imperial-japan': {
+            boardStyle: 'background:linear-gradient(135deg,#5a0a15,#841524);color:#fff6de;border:2px solid #e0b85c;border-radius:8px;box-shadow:inset 0 0 0 2px rgba(245,216,130,0.25),0 8px 20px rgba(60,5,12,0.45);',
+            pctColor: '#f5d882',
+            poleStyle: 'background:linear-gradient(90deg,#630c18,#d4a644,#4a0710);',
+            finialStyle: 'background:#f5d882;border:1.5px solid #630c18;',
+            scarf: '#8a1c26',
+            accessory: 'japan-hachimaki',
+            winTitlebar: false
+        },
+        'sun-moon': {
+            boardStyle: 'background:linear-gradient(135deg,#121a3a,#26356e);color:#fde68a;border:2px solid #f5b942;border-radius:12px;',
+            pctColor: '#ffffff',
+            poleStyle: 'background:linear-gradient(90deg,#312e81,#f5b942,#1e1b4b);',
+            finialStyle: 'background:radial-gradient(circle,#fef08a,#d98c1c);border:1px solid #ffffff;',
+            scarf: '#4f46e5',
+            accessory: 'celestial-crown',
+            winTitlebar: false
+        },
+        'doodle-paint': {
+            boardStyle: 'background:#fffdf5;color:#141926;border:2.5px solid #1e293b;border-radius:12px;box-shadow:3px 3px 0 #1e293b;',
+            pctColor: '#2563eb',
+            poleStyle: 'background:linear-gradient(90deg,#f59e0b 0 35%,#fde047 35% 70%,#d97706 70% 100%);border:1.5px solid #1e293b;',
+            finialStyle: 'background:#f43f5e;border:1.5px solid #1e293b;',
+            scarf: '#f43f5e',
+            accessory: 'artist-beret',
+            winTitlebar: false
+        },
+        'deep-space': {
+            boardStyle: 'background:linear-gradient(135deg,#070d24,#162552);color:#e0f2fe;border:2px solid #38bdf8;border-radius:10px;box-shadow:0 0 16px rgba(56,189,248,0.45);',
+            pctColor: '#7dd3fc',
+            poleStyle: 'background:linear-gradient(90deg,#1e3a8a,#38bdf8,#6d28d9);',
+            finialStyle: 'background:#7dd3fc;border:1.5px solid #a78bfa;box-shadow:0 0 8px #38bdf8;',
+            scarf: '#a78bfa',
+            accessory: 'space-helmet',
+            winTitlebar: false
+        },
+        'ramadhan-kareem': {
+            boardStyle: 'background:linear-gradient(135deg,#08241b,#124232);color:#f8df8c;border:2px solid #e6bc53;border-radius:12px;box-shadow:0 8px 20px rgba(0,0,0,0.5);',
+            pctColor: '#6ee7b7',
+            poleStyle: 'background:linear-gradient(90deg,#0f382b,#e6bc53,#09221a);',
+            finialStyle: 'background:#f8df8c;border:1.5px solid #0a251c;',
+            scarf: '#e6bc53',
+            accessory: 'ramadhan-kufi',
+            winTitlebar: false
+        },
+        'christmas-festive': {
+            boardStyle: 'background:linear-gradient(135deg,#0f3827,#17523a);color:#ffffff;border:2px solid #d4a23e;border-radius:10px;box-shadow:0 0 0 2px #b4202e,0 8px 18px rgba(15,56,39,0.4);',
+            pctColor: '#fae09e',
+            poleStyle: 'background:repeating-linear-gradient(135deg,#dc2626 0 5px,#ffffff 5px 10px);border:1px solid #991b1b;',
+            finialStyle: 'background:#d4a23e;border:1.5px solid #b4202e;',
+            scarf: '#dc2626',
+            accessory: 'santa-hat',
+            winTitlebar: false
+        }
+    };
+    return styles[themeId] || styles['default'];
+}
+
+function buildDuckAccessorySvg(accessoryType) {
+    switch (accessoryType) {
+        case 'hardhat-blue':
+            return `<path d="M51 22 C52 10 73 10 74 22 Z" fill="#0ea5e9" stroke="#0369a1" stroke-width="1.6"/>
+                    <rect x="49" y="20.5" width="28" height="3.5" rx="1.6" fill="#0284c7"/>
+                    <rect x="60" y="13" width="5" height="6" rx="1" fill="#e0f2fe" opacity="0.85"/>`;
+        case 'hardhat-yellow':
+            return `<path d="M51 22 C52 10 73 10 74 22 Z" fill="#facc15" stroke="#a16207" stroke-width="1.6"/>
+                    <rect x="49" y="20.5" width="28" height="3.5" rx="1.6" fill="#eab308"/>
+                    <rect x="61" y="25" width="11" height="4.5" rx="2" fill="#38bdf8" fill-opacity="0.72" stroke="#0f172a" stroke-width="1.2"/>`;
+        case 'blangkon-dark':
+            return `<path d="M49 23 C51 11 73 11 75 23 C69 20 55 20 49 23 Z" fill="#4a2b14" stroke="#e0b85c" stroke-width="1.4"/>
+                    <path d="M53 18 Q62 14 71 18" fill="none" stroke="#f4d47c" stroke-width="1.4" stroke-dasharray="2.5 2"/>
+                    <circle cx="48.5" cy="21" r="3.6" fill="#3b200e" stroke="#e0b85c" stroke-width="1.2"/>`;
+        case 'blangkon-ivory':
+            return `<path d="M49 23 C51 11 73 11 75 23 C69 20 55 20 49 23 Z" fill="#8b5a2b" stroke="#f6e7c6" stroke-width="1.4"/>
+                    <path d="M53 18 Q62 14 71 18" fill="none" stroke="#f7dc88" stroke-width="1.4" stroke-dasharray="2.5 2"/>
+                    <circle cx="48.5" cy="21" r="3.6" fill="#6b421c" stroke="#f7dc88" stroke-width="1.2"/>`;
+        case 'songkok-emerald':
+            return `<path d="M53 21 L55 10 Q63 8.5 71 10 L73 21 Z" fill="#0d3b2b" stroke="#f4d87c" stroke-width="1.5"/>
+                    <line x1="54" y1="18.5" x2="72" y2="18.5" stroke="#f4d87c" stroke-width="1.6"/>
+                    <circle cx="67" cy="14" r="1.7" fill="#f4d87c"/>`;
+        case 'macos-headphones':
+            return `<path d="M54 25 C54 11 72 11 72 25" fill="none" stroke="#cbd5e1" stroke-width="2.6" stroke-linecap="round"/>
+                    <rect x="55" y="23" width="6.5" height="9.5" rx="3.2" fill="#e2e8f0" stroke="#64748b" stroke-width="1.3"/>
+                    <rect x="63" y="25" width="9" height="4.2" rx="1.8" fill="#0f172a" fill-opacity="0.78" stroke="#94a3b8" stroke-width="1"/>`;
+        case 'win98-shades':
+            return `<rect x="59" y="24" width="14" height="5" fill="#000000"/>
+                    <rect x="61" y="25" width="3" height="1.5" fill="#ffffff"/>
+                    <rect x="68" y="25" width="3" height="1.5" fill="#ffffff"/>
+                    <rect x="54" y="24.5" width="6" height="1.8" fill="#000000"/>`;
+        case 'japan-hachimaki':
+            return `<path d="M52 20.5 Q63 17.5 74 20.5 L74 24.5 Q63 21.5 52 24.5 Z" fill="#8a1c26" stroke="#f5d882" stroke-width="1"/>
+                    <circle cx="65" cy="21" r="2.2" fill="#f5d882"/>
+                    <path d="M52 22 L44 19 M52 23.5 L45 25.5" stroke="#8a1c26" stroke-width="2.2" stroke-linecap="round"/>`;
+        case 'celestial-crown':
+            return `<path d="M53 21 L55 11 L60 16 L63 8 L66 16 L71 11 L73 21 Z" fill="#f5b942" stroke="#151e42" stroke-width="1.3" stroke-linejoin="round"/>
+                    <circle cx="63" cy="16.5" r="2" fill="#4f46e5"/>`;
+        case 'artist-beret':
+            return `<ellipse cx="62" cy="17.5" rx="13.5" ry="5.5" transform="rotate(-10 62 17.5)" fill="#f43f5e" stroke="#1e293b" stroke-width="1.8"/>
+                    <path d="M61 12 L63 8.5" stroke="#1e293b" stroke-width="2" stroke-linecap="round"/>
+                    <circle cx="67" cy="17" r="2" fill="#fde047"/>`;
+        case 'space-helmet':
+            return `<circle cx="64" cy="27" r="16.5" fill="rgba(56,189,248,0.16)" stroke="#7dd3fc" stroke-width="1.9"/>
+                    <path d="M54 19 A11 11 0 0 1 65 13" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" opacity="0.8"/>
+                    <rect x="53" y="40" width="21" height="3.5" rx="1.7" fill="#38bdf8" stroke="#0f172a" stroke-width="1"/>`;
+        case 'ramadhan-kufi':
+            return `<path d="M53 21 C53 12 73 12 73 21 Z" fill="#0f4c36" stroke="#e6bc53" stroke-width="1.5"/>
+                    <line x1="53.5" y1="19" x2="72.5" y2="19" stroke="#e6bc53" stroke-width="1.6"/>
+                    <path d="M65.5 14.3 A2.4 2.4 0 1 1 63 16.8 A1.9 1.9 0 1 0 65.5 14.3 Z" fill="#f8df8c"/>`;
+        case 'santa-hat':
+            return `<path d="M51 21 C55 9 72 8 76 20 Z" fill="#dc2626" stroke="#991b1b" stroke-width="1.2"/>
+                    <path d="M51 20 C48 16 45 17 44 21" fill="none" stroke="#dc2626" stroke-width="4" stroke-linecap="round"/>
+                    <circle cx="43.5" cy="21" r="3.2" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.9"/>
+                    <rect x="50" y="19" width="26" height="4.2" rx="2.1" fill="#ffffff" stroke="#e2e8f0" stroke-width="0.8"/>`;
+        default:
+            return '';
     }
+}
+
+function buildDuckSvg(themeStyle, variant) {
+    // Leader = warm bright duck yellow; small ducks = cheerful yellow; tiniest = soft lemon fluff
+    const bodyFill = variant === 'tiny' ? '#fef08a' : (variant === 'leader' ? '#facc15' : '#fde047');
+    const wingFill = variant === 'tiny' ? '#fde047' : '#eab308';
+    const outline = '#92400e';
+    const accessorySvg = buildDuckAccessorySvg(themeStyle.accessory);
+
+    return `
+        <svg viewBox="0 0 92 86" class="w-full h-full overflow-visible" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <!-- Back Foot -->
+            <g class="ewip-duck-foot-back">
+                <path d="M36 69 L36 78 L46 79" fill="none" stroke="#ea580c" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+            </g>
+            <!-- Front Foot -->
+            <g class="ewip-duck-foot-front">
+                <path d="M48 69 L48 78 L59 79" fill="none" stroke="#f97316" stroke-width="3.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </g>
+            <!-- Tail & Plump Body (Facing Right) -->
+            <path d="M13 46 C8 43 8 36 16 40 C22 39 29 41 37 42 C49 42 63 45 65 56 C66 66 56 72 41 72 C24 72 14 63 13 46 Z" fill="${bodyFill}" stroke="${outline}" stroke-width="2" stroke-linejoin="round"/>
+            <!-- Wing -->
+            <path d="M27 51 C37 47 52 50 54 58 C51 64 36 65 26 60 C23 58 23 53 27 51 Z" fill="${wingFill}" stroke="${outline}" stroke-width="1.6"/>
+            <!-- Neck & Head -->
+            <circle cx="62" cy="30" r="14.5" fill="${bodyFill}" stroke="${outline}" stroke-width="2"/>
+            <!-- Theme Scarf / Collar Accent -->
+            <path d="M51 41 Q61 46 71 42 L70 46.5 Q61 50 50 45 Z" fill="${themeStyle.scarf}" stroke="${outline}" stroke-width="1.1"/>
+            <path d="M53 44 L47 51 L52 52 L56 46 Z" fill="${themeStyle.scarf}" stroke="${outline}" stroke-width="1"/>
+            <!-- Orange Duck Bill (Facing Right) -->
+            <path d="M74 28 C81 27.5 87 30 86.5 33 C86 35.5 79 36.2 73.5 35 Z" fill="#f97316" stroke="#9a3412" stroke-width="1.6" stroke-linejoin="round"/>
+            <!-- Cheek & Eye -->
+            <circle cx="66.5" cy="27.5" r="2.7" fill="#1e293b"/>
+            <circle cx="67.5" cy="26.5" r="0.95" fill="#ffffff"/>
+            <ellipse cx="69" cy="33" rx="2.6" ry="1.5" fill="#fb7185" opacity="0.55"/>
+            <!-- Theme Accessory -->
+            ${accessorySvg}
+        </svg>
+    `;
+}
+
+window.triggerDuckParade = function(fifoPct) {
+    // Mencegah parade tumpang tindih jika bebek masih berjalan
+    if (document.getElementById('ewip-duck-parade-stage')) return;
+
+    const pctNum = typeof fifoPct === 'number' && !isNaN(fifoPct) ? fifoPct : 90;
+    const pctText = pctNum.toFixed(1) + '%';
+    const themeId = typeof window.getActiveThemeId === 'function' ? window.getActiveThemeId() : 'default';
+    const themeStyle = getDuckParadeThemeStyle(themeId);
+
+    const stage = document.createElement('div');
+    stage.id = 'ewip-duck-parade-stage';
+    stage.className = 'ewip-duck-parade-stage';
+    stage.setAttribute('aria-hidden', 'true');
+
+    // Formasi horizontal dari belakang (kiri) ke depan (kanan):
+    // 1 bebek paling kecil (belakang) -> 4 bebek kecil -> 1 bebek besar paling depan membawa papan
+    const signContent = themeStyle.winTitlebar
+        ? `<div style="background:linear-gradient(90deg,#000080,#1084d0);color:#ffffff;font-size:9px;padding:2px 6px;display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;">
+                <span>E-WIP FIFO.exe</span>
+                <span style="background:#c0c0c0;color:#000;padding:0 3px;border:1px solid #404040;line-height:1.1;">&times;</span>
+           </div>
+           <div style="padding:5px 10px;font-size:11.5px;font-weight:800;">Selamat atas FIFO <span class="ewip-duck-sign-pct" style="color:${themeStyle.pctColor};">${pctText}</span></div>`
+        : `<span>Selamat atas FIFO</span><span class="ewip-duck-sign-pct" style="color:${themeStyle.pctColor};">${pctText}</span>`;
+
+    const followers = [
+        { variant: 'tiny',  w: 38, h: 36, delay: '0.06s' },
+        { variant: 'small', w: 56, h: 52, delay: '0.18s' },
+        { variant: 'small', w: 56, h: 52, delay: '0.32s' },
+        { variant: 'small', w: 56, h: 52, delay: '0.12s' },
+        { variant: 'small', w: 56, h: 52, delay: '0.26s' }
+    ];
+
+    const followersHtml = followers.map(d => `
+        <div class="ewip-duck-unit ${d.variant === 'tiny' ? 'is-tiny' : ''}" style="width:${d.w}px;height:${d.h}px;animation-delay:${d.delay};">
+            ${buildDuckSvg(themeStyle, d.variant)}
+        </div>
+    `).join('');
+
+    const leaderHtml = `
+        <div class="ewip-duck-leader-wrap">
+            <div class="ewip-duck-sign-rig">
+                <div class="ewip-duck-pole-finial" style="${themeStyle.finialStyle}"></div>
+                <div class="ewip-duck-signboard" style="${themeStyle.boardStyle};${themeStyle.winTitlebar ? 'flex-direction:column;gap:0;' : ''}">
+                    ${signContent}
+                </div>
+                <div class="ewip-duck-pole" style="${themeStyle.poleStyle}"></div>
+            </div>
+            <div class="ewip-duck-unit is-leader" style="width:92px;height:86px;margin-right:105px;">
+                ${buildDuckSvg(themeStyle, 'leader')}
+            </div>
+        </div>
+    `;
+
+    stage.innerHTML = `<div class="ewip-duck-parade-track">${followersHtml}${leaderHtml}</div>`;
+    document.body.appendChild(stage);
+
+    const track = stage.querySelector('.ewip-duck-parade-track');
+    const cleanup = () => {
+        if (stage && stage.parentNode) stage.remove();
+    };
+    if (track) track.addEventListener('animationend', cleanup, { once: true });
+    setTimeout(cleanup, 18500);
 };
+window.triggerDuckRain = window.triggerDuckParade;
 
 const SH_ACTION_PINS = [
     '110603', '111111', '111222', '222111', '121212',
@@ -857,6 +1183,101 @@ const batikChartPlugin = {
                             ctx.stroke();
                         }
                     }
+                } else if (ct.plotWatermarkStyle === 'celestial') {
+                    // Sun rays & crescent moon celestial grid
+                    const stepX = 76;
+                    const stepY = 64;
+                    for (let x = left + 22; x < right + stepX; x += stepX) {
+                        for (let y = top + 22; y < bottom + stepY; y += stepY) {
+                            ctx.beginPath();
+                            ctx.arc(x, y, 6, 0, Math.PI * 2);
+                            ctx.stroke();
+                            for (let r = 0; r < 8; r++) {
+                                const ang = (r * Math.PI) / 4;
+                                ctx.beginPath();
+                                ctx.moveTo(x + Math.cos(ang) * 9, y + Math.sin(ang) * 9);
+                                ctx.lineTo(x + Math.cos(ang) * 12.5, y + Math.sin(ang) * 12.5);
+                                ctx.stroke();
+                            }
+                            const mx = x + stepX * 0.5;
+                            const my = y + stepY * 0.5;
+                            ctx.beginPath();
+                            ctx.arc(mx, my, 8, 0.45 * Math.PI, 1.55 * Math.PI, false);
+                            ctx.arc(mx + 3.5, my, 6.2, 1.48 * Math.PI, 0.52 * Math.PI, true);
+                            ctx.stroke();
+                        }
+                    }
+                } else if (ct.plotWatermarkStyle === 'doodle') {
+                    // Playful sketchbook scribble waves & hand-drawn stars
+                    const stepX = 72;
+                    const stepY = 58;
+                    for (let x = left + 14; x < right + stepX; x += stepX) {
+                        for (let y = top + 20; y < bottom + stepY; y += stepY) {
+                            ctx.beginPath();
+                            ctx.moveTo(x - 10, y);
+                            ctx.quadraticCurveTo(x - 5, y - 6, x, y);
+                            ctx.quadraticCurveTo(x + 5, y + 6, x + 10, y);
+                            ctx.stroke();
+                            const sx = x + stepX * 0.5;
+                            const sy = y + stepY * 0.48;
+                            ctx.beginPath();
+                            ctx.moveTo(sx - 5, sy); ctx.lineTo(sx + 5, sy);
+                            ctx.moveTo(sx, sy - 5); ctx.lineTo(sx, sy + 5);
+                            ctx.moveTo(sx - 3.5, sy - 3.5); ctx.lineTo(sx + 3.5, sy + 3.5);
+                            ctx.moveTo(sx + 3.5, sy - 3.5); ctx.lineTo(sx - 3.5, sy + 3.5);
+                            ctx.stroke();
+                        }
+                    }
+                } else if (ct.plotWatermarkStyle === 'stars') {
+                    // Deep space 4-point star sparkles & micro orbits
+                    const stepX = 66;
+                    const stepY = 54;
+                    for (let x = left + 18; x < right + stepX; x += stepX) {
+                        for (let y = top + 18; y < bottom + stepY; y += stepY) {
+                            ctx.beginPath();
+                            ctx.moveTo(x, y - 7);
+                            ctx.quadraticCurveTo(x, y, x + 7, y);
+                            ctx.quadraticCurveTo(x, y, x, y + 7);
+                            ctx.quadraticCurveTo(x, y, x - 7, y);
+                            ctx.quadraticCurveTo(x, y, x, y - 7);
+                            ctx.stroke();
+                            ctx.beginPath();
+                            ctx.arc(x + stepX * 0.5, y + stepY * 0.45, 2.2, 0, Math.PI * 2);
+                            ctx.stroke();
+                        }
+                    }
+                } else if (ct.plotWatermarkStyle === 'arabesque') {
+                    // Ramadhan 8-point Islamic star (Rub el Hizb) subtle geometry
+                    const stepX = 72;
+                    const stepY = 64;
+                    for (let x = left + 22; x < right + stepX; x += stepX) {
+                        for (let y = top + 22; y < bottom + stepY; y += stepY) {
+                            const s = 9;
+                            ctx.strokeRect(x - s, y - s, s * 2, s * 2);
+                            ctx.save();
+                            ctx.translate(x, y);
+                            ctx.rotate(Math.PI / 4);
+                            ctx.strokeRect(-s, -s, s * 2, s * 2);
+                            ctx.restore();
+                        }
+                    }
+                } else if (ct.plotWatermarkStyle === 'snowflakes') {
+                    // Crisp 6-branch Nordic snowflake geometry
+                    const stepX = 72;
+                    const stepY = 62;
+                    for (let x = left + 22; x < right + stepX; x += stepX) {
+                        for (let y = top + 22; y < bottom + stepY; y += stepY) {
+                            for (let b = 0; b < 6; b++) {
+                                const ang = (b * Math.PI) / 3;
+                                const ex = x + Math.cos(ang) * 10;
+                                const ey = y + Math.sin(ang) * 10;
+                                ctx.beginPath();
+                                ctx.moveTo(x, y);
+                                ctx.lineTo(ex, ey);
+                                ctx.stroke();
+                            }
+                        }
+                    }
                 } else {
                     const step = 36;
                     for (let x = left; x < right + step; x += step) {
@@ -1101,6 +1522,27 @@ function formatExcelDateStr(value) {
 function getTodayDateStr() {
     let d = new Date(); d.setHours(0,0,0,0);
     return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+
+const WIP_RESET_HOUR = 7; // Report WIP harian direset otomatis setiap pukul 07:00 pagi
+
+function getWipCycleDateStr(dateInput) {
+    let d = dateInput ? new Date(dateInput) : new Date();
+    d.setHours(d.getHours() - WIP_RESET_HOUR);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function formatWipCycleLabel(cycleDateStr) {
+    if (cycleDateStr && typeof cycleDateStr === 'string') {
+        const parts = cycleDateStr.split('-');
+        if (parts.length === 3) {
+            const dt = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+            if (!isNaN(dt.getTime())) {
+                return dt.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+            }
+        }
+    }
+    return new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
 }
 
 function parseIndoDate(str) {
@@ -1780,10 +2222,12 @@ window.refreshAllOpenShImpact = async function() {
 
 window.onload = async function() {
     applyNavTabClasses(window.currentActiveTab || 'overview');
-    lucide.createIcons();
+    if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
     window.updateShActionButtonsVisibility();
-    Chart.register(ChartDataLabels);
-    Chart.defaults.set('plugins.datalabels', { display: false });
+    if (typeof Chart !== 'undefined' && typeof ChartDataLabels !== 'undefined') {
+        Chart.register(ChartDataLabels);
+        Chart.defaults.set('plugins.datalabels', { display: false });
+    }
 
     const overlay = document.getElementById('loading-overlay'); 
     if(overlay) overlay.classList.remove('hidden');
@@ -1793,11 +2237,17 @@ window.onload = async function() {
     setTimeout(startLoadingNotes, 1500);
 
     if (!isFirebaseActive) {
+        setLoaderState('Memuat SDK Cloud...', 'Menghubungkan ke server cadangan Firebase', 8, 'Fallback CDN');
+        await ensureFirebaseSDKLoaded();
+    }
+
+    if (!isFirebaseActive) {
         stopLoadingNotes();
         if (overlay) overlay.classList.remove('hidden'); // Paksa overlay tetap muncul
         
         safeSetHTML('loading-notes-text', '<span class="text-red-400 font-bold">Koneksi Terputus / Sangat Lambat!</span>');
-        document.getElementById('loading-notes-text').classList.remove('hidden');
+        const notesTextEl = document.getElementById('loading-notes-text');
+        if (notesTextEl) notesTextEl.classList.remove('hidden');
         
         // Matikan skeleton dan animasi bar
         let skel = document.getElementById('loading-notes-skeleton'); if(skel) skel.style.display = 'none';
@@ -1805,20 +2255,26 @@ window.onload = async function() {
         
         // Ubah tampilan loading text menjadi peringatan Error
         safeSetHTML('loading-title', '<span class="text-red-500 font-black text-xl">Koneksi Server Gagal!</span>');
-        safeSetHTML('loading-rows', 'Sistem tidak menerima respon dari Cloud Database. Pastikan internet Anda stabil.');
+        safeSetHTML('loading-rows', 'Sistem tidak dapat memuat Firebase SDK dari jaringan saat ini. Pastikan internet Anda stabil.');
         
         // Tambahkan tombol segarkan halaman besar di tengah layar loading
         let badge = document.getElementById('loading-badge'); if(badge) badge.style.display = 'none';
         
-        let container = document.querySelector('.progress-bar-fill').parentElement;
-        container.outerHTML = `
-            <div class="flex justify-center mt-4 w-full relative z-[999999]">
-                <button onclick="window.location.reload()" class="bg-red-600 hover:bg-red-700 text-white font-black py-4 px-8 rounded-xl shadow-[0_0_20px_rgba(220,38,38,0.5)] flex items-center justify-center gap-3 transition-transform transform hover:scale-105 pointer-events-auto">
-                    <i data-lucide="refresh-cw" class="w-6 h-6"></i> KLIK UNTUK SEGARKAN HALAMAN (RELOAD)
-                </button>
-            </div>
-        `;
-        lucide.createIcons();
+        let progressFillEl = document.querySelector('.progress-bar-fill');
+        let container = progressFillEl ? progressFillEl.parentElement : null;
+        if (container) {
+            container.outerHTML = `
+                <div class="flex flex-wrap justify-center gap-3 mt-4 w-full relative z-[999999]">
+                    <button onclick="window.location.reload()" class="bg-red-600 hover:bg-red-700 text-white font-black py-3 px-6 rounded-xl shadow-[0_0_20px_rgba(220,38,38,0.5)] flex items-center justify-center gap-2 transition-transform transform hover:scale-105 pointer-events-auto">
+                        <i data-lucide="refresh-cw" class="w-5 h-5"></i> SEGARKAN HALAMAN
+                    </button>
+                    <button onclick="document.getElementById('loading-overlay').classList.add('hidden'); switchTab('overview');" class="bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 px-5 rounded-xl border border-slate-500 flex items-center justify-center gap-2 transition pointer-events-auto">
+                        <i data-lucide="eye" class="w-5 h-5"></i> BUKA MODE OFFLINE
+                    </button>
+                </div>
+            `;
+        }
+        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
         return;
     }
     
@@ -1888,14 +2344,17 @@ window.onload = async function() {
     lastReadChatCount = readChat ? parseInt(readChat) : 0;
     initChatListener();
 
-    setLoaderState('Validasi Harian...', 'Memeriksa pergantian hari', 90, 'Checking Date');
+    setLoaderState('Validasi Harian...', 'Memeriksa siklus harian 07:00 pagi', 90, 'Checking Cycle');
     let lastWipDate = await loadDB('last_wip_date');
-    let todayStr = getTodayDateStr();
+    let wipCycleStr = getWipCycleDateStr();
+    window.currentActiveWipCycleDate = wipCycleStr;
 
-    if (lastWipDate && lastWipDate !== todayStr && globalWipData.length > 0) {
+    if (lastWipDate && lastWipDate !== wipCycleStr && globalWipData.length > 0) {
         globalWipData = []; uploadedWipFiles = [];
         await saveDB('uploaded_wip_files', []);
-        showToast("Hari baru dimulai! Data WIP kemarin telah dibersihkan otomatis.", "warning");
+        await saveDB('last_wip_date', null);
+        safeSetText('info-last-sync', '-');
+        showToast("Siklus 07:00 pagi dimulai! Report WIP kemarin telah direset otomatis.", "warning");
     }
 
     setLoaderState('Menyiapkan Dashboard...', 'Merender antarmuka pengguna', 98, 'Finishing up');
@@ -1909,10 +2368,45 @@ window.onload = async function() {
     
     await window.checkWeeklyConsolidation();
     initRealtimeSyncListeners();
+    initDailyWipResetWatcher();
     
     stopLoadingNotes();
     if(overlay) overlay.classList.add('hidden');
 };
+
+let wipDailyResetIntervalId = null;
+function initDailyWipResetWatcher() {
+    if (wipDailyResetIntervalId) clearInterval(wipDailyResetIntervalId);
+    wipDailyResetIntervalId = setInterval(async () => {
+        const nextCycleStr = getWipCycleDateStr();
+        if (!window.currentActiveWipCycleDate) {
+            window.currentActiveWipCycleDate = nextCycleStr;
+            return;
+        }
+        if (nextCycleStr !== window.currentActiveWipCycleDate) {
+            window.currentActiveWipCycleDate = nextCycleStr;
+            if (globalWipData.length > 0 || uploadedWipFiles.length > 0) {
+                globalWipData = [];
+                uploadedWipFiles = [];
+                try {
+                    if (isFirebaseActive) {
+                        await saveDB('uploaded_wip_files', []);
+                        await saveDB('last_wip_date', null);
+                    }
+                } catch (e) {}
+                safeSetText('info-last-sync', '-');
+                updateWipDependencies();
+                updateInputStats();
+                renderUploadedFiles();
+                renderOverviewDashboard();
+                renderReportWIP();
+                showToast("Pukul 07:00 pagi — Report WIP harian telah direset otomatis.", "warning");
+            } else {
+                renderOverviewDashboard();
+            }
+        }
+    }, 30000);
+}
 
 function updateWipDependencies() {
     let uniqueSet = new Set();
@@ -2364,7 +2858,8 @@ async function processWIPFiles(files) {
     if(globalMasterData.length === 0) { showToast('Upload Master Data (MPP) terlebih dahulu!', 'warning'); return; }
     
     const overlay = document.getElementById('loading-overlay'); overlay.classList.remove('hidden');
-    let todayStr = getTodayDateStr();
+    let wipCycleStr = getWipCycleDateStr();
+    window.currentActiveWipCycleDate = wipCycleStr;
 
     for(let i=0; i<files.length; i++) {
         let file = files[i];
@@ -2472,7 +2967,8 @@ async function processWIPFiles(files) {
         // 2. Simpan WIP Harian (Latar belakang)
         syncWipToCloud(); 
         
-        await saveDB('last_wip_date', todayStr);
+        await saveDB('last_wip_date', wipCycleStr);
+        safeSetText('info-last-sync', wipCycleStr);
         
         updateInputStats(); renderUploadedFiles();
         
@@ -2700,6 +3196,7 @@ async function recalculateValidation(skipMasterSync = false) {
 
     let today = new Date(); today.setHours(0,0,0,0);
     let todayStr = getTodayDateStr();
+    let wipCycleStr = getWipCycleDateStr();
     let todayTime = today.getTime();
 
     let wipUidSet = new Set();
@@ -2769,9 +3266,9 @@ async function recalculateValidation(skipMasterSync = false) {
 
     let totalAct = openCount + cnd3Count + cnd2Count;
     let pctOnSched = totalAct > 0 ? (openCount / totalAct) * 100 : 0;
-    let newHistoryEntry = { dateKey: todayStr, label: new Date().toLocaleDateString('id-ID', {day:'numeric', month:'short'}), cnd3: cnd3Count + cnd2Count, open: openCount, closed: globalMasterData.filter(m=>m._status==='CLOSED').length, pct: pctOnSched, catPct: {} };
+    let newHistoryEntry = { dateKey: wipCycleStr, label: formatWipCycleLabel(wipCycleStr), cnd3: cnd3Count + cnd2Count, open: openCount, closed: globalMasterData.filter(m=>m._status==='CLOSED').length, pct: pctOnSched, catPct: {} };
     
-    let existingHistoryIdx = dailyHistory.findIndex(h => h.dateKey === todayStr);
+    let existingHistoryIdx = dailyHistory.findIndex(h => h.dateKey === wipCycleStr);
     if(existingHistoryIdx !== -1) {
         dailyHistory[existingHistoryIdx].cnd3 = cnd3Count + cnd2Count;
         dailyHistory[existingHistoryIdx].open = openCount;
@@ -3568,7 +4065,8 @@ function renderOverviewDashboard() {
             };
         });
 
-        let existingHistoryIdx = dailyHistory.findIndex(h => h.dateKey === todayStr);
+        let wipCycleStr = getWipCycleDateStr();
+        let existingHistoryIdx = dailyHistory.findIndex(h => h.dateKey === wipCycleStr);
         let nextMetrics = {
             pct: Number(currentGlobalPct.toFixed(2)),
             catPct: currentCatPct,
@@ -3600,8 +4098,8 @@ function renderOverviewDashboard() {
             }
         } else {
             dailyHistory.push(Object.assign({
-                dateKey: todayStr,
-                label: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }),
+                dateKey: wipCycleStr,
+                label: formatWipCycleLabel(wipCycleStr),
                 cnd3: tCnd3 + tCnd2,
                 open: tOpen,
                 closed: tClosed
@@ -3613,11 +4111,12 @@ function renderOverviewDashboard() {
             saveDB('daily_history', dailyHistory);
         }
 
-        // TRIGGER HUJAN BEBEK JIKA TREN >= 90% (Dibatasi 1x setiap 15 detik agar tidak menumpuk)
+        // TRIGGER PARADE BEBEK JIKA FIFO >= 90% (Dibatasi 1x setiap 25 detik agar tidak menumpuk)
         let activeDisplayPct = kpiTotalLoad > 0 ? (kpiOnSched / kpiTotalLoad) * 100 : 0;
-        if (activeDisplayPct >= 90 && (Date.now() - window.lastDuckRainTime > 15000)) {
-            window.lastDuckRainTime = Date.now();
-            setTimeout(window.triggerDuckRain, 800);
+        if (activeDisplayPct >= 90 && (Date.now() - window.lastDuckParadeTime > 25000)) {
+            window.lastDuckParadeTime = Date.now();
+            const capturedPct = activeDisplayPct;
+            setTimeout(() => window.triggerDuckParade(capturedPct), 800);
         }
     }
 
@@ -4494,13 +4993,14 @@ function getUniqueValues(colName) {
     if (colName === 'STATUS') {
         globalMasterData.forEach(row => { if (row._status) values.add(row._status); });
     } else if (colName === 'PROBLEM') {
+        const { shByUid, pyByUid } = buildControlLookupMaps();
         globalMasterData.forEach(row => {
-            let impacts = globalShMaterials.filter(sh => sh.targetUids && sh.targetUids.includes(row._uid));
-            let pyList = globalAssyPaylater.filter(py => py.uid === row._uid);
-            let probs = [];
-            if (impacts.length > 0) probs.push('SH');
-            if (pyList.length > 0) probs.push('Py');
-            values.add(probs.length > 0 ? probs.join(' & ') : '-');
+            const hasSh = shByUid.has(row._uid);
+            const hasPy = pyByUid.has(row._uid);
+            if (hasSh && hasPy) values.add('SH & Py');
+            else if (hasSh) values.add('SH');
+            else if (hasPy) values.add('Py');
+            else values.add('-');
         });
     } else {
         globalMasterData.forEach(row => {
@@ -4587,23 +5087,192 @@ window.setupControlHeaders = function() {
 
     controlFilters = {};
     document.querySelectorAll('.filter-checkbox').forEach(cb => cb.addEventListener('change', (e) => updateCheckboxFilters(e.target.getAttribute('data-col-idx'))));
-    document.querySelectorAll('.filter-input').forEach(input => input.addEventListener('input', (e) => { controlFilters[e.target.getAttribute('data-col')] = e.target.value.toLowerCase(); renderControlOutstanding(); }));
+    let controlFilterDebounceTimer = null;
+    document.querySelectorAll('.filter-input').forEach(input => input.addEventListener('input', (e) => {
+        const colKey = e.target.getAttribute('data-col');
+        const val = e.target.value.toLowerCase();
+        if (val === '') delete controlFilters[colKey];
+        else controlFilters[colKey] = val;
+        if (controlFilterDebounceTimer) clearTimeout(controlFilterDebounceTimer);
+        controlFilterDebounceTimer = setTimeout(() => {
+            renderControlOutstanding();
+        }, 180);
+    }));
     
     renderControlOutstanding();
 }
 
 function setupControlHeaders() { window.setupControlHeaders(); }
 
-let controlCurrentPage = 1;
-const controlItemsPerPage = 100;
-let controlFilteredDataCache = [];
+const CONTROL_PAGE_SIZE_KEY = 'ewip_control_page_size';
+const CONTROL_ALLOWED_PAGE_SIZES = [25, 50, 100, 250, 500];
 
-window.prevControlPage = function() {
-    if(controlCurrentPage > 1) { controlCurrentPage--; renderControlTableBody(); }
+function getSavedControlPageSize() {
+    try {
+        const saved = parseInt(localStorage.getItem(CONTROL_PAGE_SIZE_KEY), 10);
+        if (CONTROL_ALLOWED_PAGE_SIZES.includes(saved)) return saved;
+    } catch (e) {}
+    return 50;
 }
-window.nextControlPage = function() {
-    let maxPage = Math.ceil(controlFilteredDataCache.length / controlItemsPerPage);
-    if(controlCurrentPage < maxPage) { controlCurrentPage++; renderControlTableBody(); }
+
+let controlCurrentPage = 1;
+let controlItemsPerPage = getSavedControlPageSize();
+let controlFilteredDataCache = [];
+let controlLookupMaps = { shByUid: new Map(), pyByUid: new Map(), rocketByKey: new Map() };
+
+function buildControlLookupMaps() {
+    const shByUid = new Map();
+    (globalShMaterials || []).forEach(sh => {
+        if (!sh || !Array.isArray(sh.targetUids)) return;
+        sh.targetUids.forEach(uid => {
+            let list = shByUid.get(uid);
+            if (!list) { list = []; shByUid.set(uid, list); }
+            list.push(sh);
+        });
+    });
+
+    const pyByUid = new Map();
+    (globalAssyPaylater || []).forEach(py => {
+        if (!py || !py.uid) return;
+        let list = pyByUid.get(py.uid);
+        if (!list) { list = []; pyByUid.set(py.uid, list); }
+        list.push(py);
+    });
+
+    const rocketByKey = new Map();
+    (globalAssyRocket || []).forEach(r => {
+        if (!r) return;
+        const key = `${r.assy}|${r.wp}|${r.periode}`;
+        if (!rocketByKey.has(key)) rocketByKey.set(key, r);
+    });
+
+    controlLookupMaps = { shByUid, pyByUid, rocketByKey };
+    return controlLookupMaps;
+}
+
+function getControlProblemBadgeHtmlFast(uid, assyName) {
+    const impacts = controlLookupMaps.shByUid.get(uid);
+    const pyList = controlLookupMaps.pyByUid.get(uid);
+    if ((!impacts || impacts.length === 0) && (!pyList || pyList.length === 0)) return '-';
+
+    let html = '';
+    const safeAssy = String(assyName || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    if (impacts && impacts.length > 0) {
+        const isAllArrived = impacts.every(sh => sh.tanggalKedatangan !== null);
+        const badgeClass = isAllArrived
+            ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+            : 'bg-red-100 text-red-700 border-red-200 animate-pulse';
+        html += `<button onclick="event.stopPropagation(); window.showShDetailPopup('${uid}', '${safeAssy}')" class="px-1.5 py-0.5 rounded border text-[9px] font-bold shadow-sm hover:scale-105 transition-transform ${badgeClass} mr-1">SH</button>`;
+    }
+    if (pyList && pyList.length > 0) {
+        const isAllDorong = pyList.every(py => py.dorongDate !== null);
+        const badgeClass = isAllDorong
+            ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+            : 'bg-purple-100 text-purple-700 border-purple-200 animate-pulse';
+        html += `<button onclick="event.stopPropagation(); window.showPaylaterDetailPopup('${uid}', '${safeAssy}')" class="px-1.5 py-0.5 rounded border text-[9px] font-bold shadow-sm hover:scale-105 transition-transform ${badgeClass}">Py</button>`;
+    }
+    return html || '-';
+}
+
+function getControlMaxPage() {
+    return Math.max(1, Math.ceil(controlFilteredDataCache.length / controlItemsPerPage));
+}
+
+window.goToControlPage = function(pageNum) {
+    const maxPage = getControlMaxPage();
+    const target = Math.min(maxPage, Math.max(1, parseInt(pageNum, 10) || 1));
+    if (target !== controlCurrentPage) {
+        controlCurrentPage = target;
+        renderControlTableBody();
+    } else {
+        const jumpEl = document.getElementById('control-page-jump');
+        if (jumpEl) jumpEl.value = controlCurrentPage;
+    }
+};
+window.firstControlPage = function() { window.goToControlPage(1); };
+window.prevControlPage = function() { window.goToControlPage(controlCurrentPage - 1); };
+window.nextControlPage = function() { window.goToControlPage(controlCurrentPage + 1); };
+window.lastControlPage = function() { window.goToControlPage(getControlMaxPage()); };
+
+window.changeControlPageSize = function(newSize) {
+    const parsed = parseInt(newSize, 10);
+    if (!CONTROL_ALLOWED_PAGE_SIZES.includes(parsed)) return;
+    controlItemsPerPage = parsed;
+    try { localStorage.setItem(CONTROL_PAGE_SIZE_KEY, String(parsed)); } catch (e) {}
+    controlCurrentPage = 1;
+    renderControlTableBody();
+};
+
+window.handleControlPageJump = function(rawVal) {
+    const parsed = parseInt(rawVal, 10);
+    if (isNaN(parsed)) {
+        const jumpEl = document.getElementById('control-page-jump');
+        if (jumpEl) jumpEl.value = controlCurrentPage;
+        return;
+    }
+    window.goToControlPage(parsed);
+};
+
+function buildPaginationSequence(current, total) {
+    if (total <= 7) {
+        return Array.from({ length: total }, (_, i) => i + 1);
+    }
+    const pages = [1];
+    const start = Math.max(2, current - 1);
+    const end = Math.min(total - 1, current + 1);
+    if (start > 2) pages.push('...');
+    for (let p = start; p <= end; p++) pages.push(p);
+    if (end < total - 1) pages.push('...');
+    pages.push(total);
+    return pages;
+}
+
+function renderControlPaginationUI(totalItems, maxPage, startIndex, pageRowCount) {
+    const isFirst = controlCurrentPage <= 1;
+    const isLast = controlCurrentPage >= maxPage;
+
+    safeSetText('control-counter', `Total ${totalItems.toLocaleString('id-ID')} Baris`);
+    safeSetText('control-total-pages', maxPage.toLocaleString('id-ID'));
+
+    if (totalItems === 0 || pageRowCount === 0) {
+        safeSetText('control-range-info', 'Menampilkan 0 dari 0 baris');
+    } else {
+        const from = startIndex + 1;
+        const to = startIndex + pageRowCount;
+        safeSetText('control-range-info', `Menampilkan ${from.toLocaleString('id-ID')}–${to.toLocaleString('id-ID')} dari ${totalItems.toLocaleString('id-ID')} baris`);
+    }
+
+    const sizeSel = document.getElementById('control-page-size-select');
+    if (sizeSel && String(sizeSel.value) !== String(controlItemsPerPage)) {
+        sizeSel.value = String(controlItemsPerPage);
+    }
+
+    const jumpEl = document.getElementById('control-page-jump');
+    if (jumpEl) {
+        jumpEl.max = String(maxPage);
+        jumpEl.value = String(controlCurrentPage);
+    }
+
+    ['btn-control-first', 'btn-control-prev'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = isFirst;
+    });
+    ['btn-control-next', 'btn-control-last'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = isLast;
+    });
+
+    const pagesEl = document.getElementById('control-page-numbers');
+    if (pagesEl) {
+        const seq = buildPaginationSequence(controlCurrentPage, maxPage);
+        pagesEl.innerHTML = seq.map(item => {
+            if (item === '...') {
+                return `<span class="ewip-pg-ellipsis" aria-hidden="true">&hellip;</span>`;
+            }
+            const isActive = item === controlCurrentPage;
+            return `<button type="button" onclick="goToControlPage(${item})" class="ewip-pg-btn ${isActive ? 'is-active' : ''}" ${isActive ? 'aria-current="page"' : ''}>${item}</button>`;
+        }).join('');
+    }
 }
 
 window.exportControlDataXLSX = function() {
@@ -4683,114 +5352,136 @@ window.exportControlDataXLSX = function() {
     }, 300); // Beri waktu UI untuk render progress bar
 };
 
-window.renderControlOutstanding = function() {
+window.renderControlOutstanding = function(preservePage = false) {
     let displayHeaders = targetColumnsDB.filter(col => {
         return masterHeaders.includes(col) || col === 'STATUS' || col === 'PROBLEM';
     });
-    if (displayHeaders.length < 3) displayHeaders = targetColumnsDB; 
+    if (displayHeaders.length < 3) displayHeaders = targetColumnsDB;
+
+    const { shByUid, pyByUid } = buildControlLookupMaps();
+    const activeFilterCols = displayHeaders.filter(col => controlFilters[col] !== undefined && controlFilters[col] !== '');
 
     let filteredData = globalMasterData.filter(row => {
         if (activePeriodeTab !== 'ALL') {
             let rPer = String(row['PERIODE'] || '').trim();
             if (rPer !== activePeriodeTab) return false;
         }
-        return displayHeaders.every(col => {
-            let filterVal = controlFilters[col];
-            if (filterVal === undefined || filterVal === '') return true; 
-            
+        for (let i = 0; i < activeFilterCols.length; i++) {
+            const col = activeFilterCols[i];
+            const filterVal = controlFilters[col];
             let cellValue = '';
             if (col === 'STATUS') {
                 cellValue = row._status ? String(row._status).toLowerCase().trim() : '';
             } else if (col === 'PROBLEM') {
-                let impacts = globalShMaterials.filter(sh => sh.targetUids && sh.targetUids.includes(row._uid));
-                let pyList = globalAssyPaylater.filter(py => py.uid === row._uid);
-                let probs = [];
-                if (impacts.length > 0) probs.push('sh');
-                if (pyList.length > 0) probs.push('py');
-                cellValue = probs.length > 0 ? probs.join(' & ') : '-';
+                const hasSh = shByUid.has(row._uid);
+                const hasPy = pyByUid.has(row._uid);
+                if (hasSh && hasPy) cellValue = 'sh & py';
+                else if (hasSh) cellValue = 'sh';
+                else if (hasPy) cellValue = 'py';
+                else cellValue = '-';
             } else {
                 cellValue = row[col] !== undefined ? String(row[col]).toLowerCase().trim() : '';
             }
-            
+
             if (dropdownColumns.includes(col)) {
-                if (Array.isArray(filterVal)) { 
-                    if (filterVal.length === 0) return false; 
-                    return filterVal.includes(cellValue); 
+                if (Array.isArray(filterVal)) {
+                    if (filterVal.length === 0 || !filterVal.includes(cellValue)) return false;
+                } else if (cellValue !== filterVal) {
+                    return false;
                 }
-                return cellValue === filterVal;
-            } else { 
-                return cellValue.includes(filterVal); 
+            } else if (!cellValue.includes(filterVal)) {
+                return false;
             }
-        });
+        }
+        return true;
     });
 
-    filteredData.sort((a, b) => {
-        let tA = parseIndoDate(a['STWC']);
-        let tB = parseIndoDate(b['STWC']);
-        if (tA === 0) tA = 9999999999999; 
-        if (tB === 0) tB = 9999999999999;
-        return tA - tB;
+    // Pre-compute STWC sort keys once (Schwartzian transform) for fast sorting on large datasets
+    const keyed = filteredData.map(row => {
+        let t = parseIndoDate(row['STWC']);
+        return { row, t: t === 0 ? 9999999999999 : t };
     });
+    keyed.sort((a, b) => a.t - b.t);
+    controlFilteredDataCache = keyed.map(item => item.row);
 
-    controlFilteredDataCache = filteredData;
-    controlCurrentPage = 1;
+    if (!preservePage) controlCurrentPage = 1;
     renderControlTableBody();
-}
-function renderControlOutstanding() { window.renderControlOutstanding(); }
+};
+function renderControlOutstanding(preservePage = false) { window.renderControlOutstanding(preservePage); }
+
+const CONTROL_ROCKET_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5 text-pink-600 shrink-0"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>';
 
 window.renderControlTableBody = function() {
     let displayHeaders = targetColumnsDB.filter(col => masterHeaders.includes(col) || col === 'STATUS' || col === 'PROBLEM');
     if (displayHeaders.length < 3) displayHeaders = targetColumnsDB;
 
-    let maxPage = Math.ceil(controlFilteredDataCache.length / controlItemsPerPage) || 1;
-    if(controlCurrentPage > maxPage) controlCurrentPage = maxPage;
-    
-    let startIndex = (controlCurrentPage - 1) * controlItemsPerPage;
-    let endIndex = startIndex + controlItemsPerPage;
-    let pagedData = controlFilteredDataCache.slice(startIndex, endIndex);
+    const totalItems = controlFilteredDataCache.length;
+    const maxPage = getControlMaxPage();
+    if (controlCurrentPage > maxPage) controlCurrentPage = maxPage;
+    if (controlCurrentPage < 1) controlCurrentPage = 1;
 
-    let htmlString = "";
-    pagedData.forEach((row, idx) => {
-        let bgClass = ''; let badge = '';
-        let isRocket = globalAssyRocket.some(r => r.assy === superCleanAssy(row.ASSY) && r.wp === superCleanAssy(row.WP) && r.periode === row.PERIODE);
+    const startIndex = (controlCurrentPage - 1) * controlItemsPerPage;
+    const endIndex = startIndex + controlItemsPerPage;
+    const pagedData = controlFilteredDataCache.slice(startIndex, endIndex);
+    const { rocketByKey } = controlLookupMaps;
 
-        if(row._status === 'CLOSED') { bgClass = 'bg-emerald-50'; badge = `<span class="bg-emerald-100 text-emerald-700 font-bold px-1.5 py-0.5 rounded">CLOSED PP</span>`; }
-        else if(row._status === 'CND 3') { bgClass = isRocket ? 'bg-pink-200' : 'bg-red-50'; badge = `<span class="bg-red-100 text-red-700 font-bold px-1.5 py-0.5 rounded animate-pulse shadow-sm">CND 3</span>`; }
-        else if(row._status === 'CND 2') { bgClass = isRocket ? 'bg-pink-200' : 'bg-amber-50'; badge = `<span class="bg-amber-100 text-amber-700 font-bold px-1.5 py-0.5 rounded shadow-sm">CND 2</span>`; }
-        else { bgClass = isRocket ? 'bg-pink-100' : ''; badge = `<span class="bg-blue-100 text-blue-700 font-bold px-1.5 py-0.5 rounded shadow-sm">CND 1</span>`; }
+    const rowsHtml = [];
+    if (pagedData.length === 0) {
+        rowsHtml.push(`<tr><td colspan="${displayHeaders.length}" class="text-center py-10 text-xs font-semibold text-gray-400">Tidak ada data yang sesuai dengan filter saat ini.</td></tr>`);
+    } else {
+        for (let i = 0; i < pagedData.length; i++) {
+            const row = pagedData[i];
+            const rocketKey = `${superCleanAssy(row.ASSY)}|${superCleanAssy(row.WP)}|${row.PERIODE}`;
+            const rocketMatch = rocketByKey.get(rocketKey);
+            const isRocket = !!rocketMatch;
 
-        htmlString += `<tr class="hover:bg-gray-200 ${bgClass} transition-colors border-b border-gray-100 cursor-context-menu" oncontextmenu="forceCloseAssy(event, '${row._uid}')" title="Klik Kanan baris ini untuk Force Close">`;
-        
-        displayHeaders.forEach(col => {
-            if (col === 'STATUS') {
-                htmlString += `<td class="px-2 py-1 border-r border-gray-200 text-center align-middle">${badge}</td>`;
-                return;
-            }
-            let cellData = '';
-            let colClass = isDateColumn(col) ? "font-mono font-bold text-center" : "";
-            
-            if (col === 'PROBLEM') {
-                cellData = window.getShBadgeHtml(row._uid, row.ASSY);
-                colClass = "text-center align-middle";
-            } else if (col === 'STWC' && isRocket) {
-                let rocketMatch = globalAssyRocket.find(r => r.assy === superCleanAssy(row.ASSY) && r.wp === superCleanAssy(row.WP) && r.periode === row.PERIODE);
-                cellData = `<div class="flex items-center gap-1.5 justify-center"><i data-lucide="rocket" class="w-3.5 h-3.5 text-pink-600"></i><span class="text-pink-700 font-black">${rocketMatch.stwc}</span></div>`;
+            let bgClass = '';
+            let badge = '';
+            if (row._status === 'CLOSED') {
+                bgClass = 'bg-emerald-50';
+                badge = '<span class="bg-emerald-100 text-emerald-700 font-bold px-1.5 py-0.5 rounded">CLOSED PP</span>';
+            } else if (row._status === 'CND 3') {
+                bgClass = isRocket ? 'bg-pink-200' : 'bg-red-50';
+                badge = '<span class="bg-red-100 text-red-700 font-bold px-1.5 py-0.5 rounded animate-pulse shadow-sm">CND 3</span>';
+            } else if (row._status === 'CND 2') {
+                bgClass = isRocket ? 'bg-pink-200' : 'bg-amber-50';
+                badge = '<span class="bg-amber-100 text-amber-700 font-bold px-1.5 py-0.5 rounded shadow-sm">CND 2</span>';
             } else {
-                cellData = row[col] !== undefined ? row[col] : '';
+                bgClass = isRocket ? 'bg-pink-100' : '';
+                badge = '<span class="bg-blue-100 text-blue-700 font-bold px-1.5 py-0.5 rounded shadow-sm">CND 1</span>';
             }
-            
-            htmlString += `<td class="px-2 py-1 border-r border-gray-100 max-w-[200px] truncate align-middle ${colClass}">${cellData}</td>`;
-        });
-        htmlString += `</tr>`;
-    });
 
-    safeSetHTML('control-tbody', htmlString);
-    safeSetText('control-page-info', `Page ${controlCurrentPage} of ${maxPage}`);
-    safeSetText('control-counter', `Total ${controlFilteredDataCache.length} Baris`);
-    
+            let rowCells = `<tr class="hover:bg-gray-200 ${bgClass} transition-colors border-b border-gray-100 cursor-context-menu" oncontextmenu="forceCloseAssy(event, '${row._uid}')" title="Klik Kanan baris ini untuk Force Close">`;
+            for (let c = 0; c < displayHeaders.length; c++) {
+                const col = displayHeaders[c];
+                if (col === 'STATUS') {
+                    rowCells += `<td class="px-2 py-1 border-r border-gray-200 text-center align-middle">${badge}</td>`;
+                    continue;
+                }
+                let cellData = '';
+                let colClass = isDateColumn(col) ? 'font-mono font-bold text-center' : '';
+
+                if (col === 'PROBLEM') {
+                    cellData = getControlProblemBadgeHtmlFast(row._uid, row.ASSY);
+                    colClass = 'text-center align-middle';
+                } else if (col === 'STWC' && isRocket) {
+                    cellData = `<div class="flex items-center gap-1.5 justify-center">${CONTROL_ROCKET_SVG}<span class="text-pink-700 font-black">${rocketMatch.stwc}</span></div>`;
+                } else {
+                    cellData = row[col] !== undefined ? row[col] : '';
+                }
+                rowCells += `<td class="px-2 py-1 border-r border-gray-100 max-w-[200px] truncate align-middle ${colClass}">${cellData}</td>`;
+            }
+            rowCells += '</tr>';
+            rowsHtml.push(rowCells);
+        }
+    }
+
+    safeSetHTML('control-tbody', rowsHtml.join(''));
+    renderControlPaginationUI(totalItems, maxPage, startIndex, pagedData.length);
+
     const tableContainer = document.getElementById('control-table-container');
-    if(tableContainer) tableContainer.scrollTop = 0;
-}
+    if (tableContainer) tableContainer.scrollTop = 0;
+};
 function renderControlTableBody() { window.renderControlTableBody(); }
 
 window.forceCloseAssy = function(e, uid) {
@@ -4803,7 +5494,7 @@ window.forceCloseAssy = function(e, uid) {
         target._status = 'CLOSED';
         target._closedDate = getTodayDateStr();
         syncMasterToCloud().then(() => {
-            renderControlOutstanding(); 
+            renderControlOutstanding(true);
             if(!document.getElementById('view-overview').classList.contains('hidden')) renderOverviewDashboard();
             showToast('Assy berhasil di-Closed secara paksa.', 'success');
         });
@@ -6866,7 +7557,7 @@ function parseDateKeyLocal(dateKey) {
 }
 
 function buildContinuousDailySeries() {
-    const todayStr = getTodayDateStr();
+    const todayStr = getWipCycleDateStr();
     const todayDate = parseDateKeyLocal(todayStr) || new Date();
     todayDate.setHours(0, 0, 0, 0);
 

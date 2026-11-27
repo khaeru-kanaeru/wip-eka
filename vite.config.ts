@@ -4,7 +4,7 @@ import { defineConfig } from 'vite';
 
 export default defineConfig(() => {
   return {
-    base: '/wip-eka/',
+    base: process.env.GITHUB_ACTIONS === 'true' ? '/wip-eka/' : '/',
     plugins: [
       // Copies src/assets into dist/ so root-relative URLs still resolve
       // in production builds. Do not remove.

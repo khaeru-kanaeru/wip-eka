@@ -350,6 +350,21 @@ body.ewip-app #rocket-table-body td:nth-child(7) {
     box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.15);
 }
 
+.theme-preview-icon {
+    width: 54px;
+    height: 40px;
+    border-radius: 0.5rem;
+    overflow: hidden;
+    flex-shrink: 0;
+    box-shadow: 0 3px 10px -3px rgba(0, 0, 0, 0.25);
+    transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.2s ease;
+}
+
+.theme-option-card:hover .theme-preview-icon {
+    transform: scale(1.07);
+    box-shadow: 0 6px 14px -4px rgba(0, 0, 0, 0.34);
+}
+
 .theme-mode-tag {
     font-size: 9px;
     font-weight: 800;
@@ -452,12 +467,246 @@ body.ewip-app #rocket-table-body td:nth-child(7) {
     opacity: 0.45;
 }
 
+/* =========================================================
+   DATABASE BERSIH CLIENT-SIDE PAGINATION BAR (ALL THEMES)
+   ========================================================= */
+.ewip-pagination-bar {
+    background: var(--surface-2);
+    border-top: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+}
+
+.ewip-pg-btn {
+    min-width: 28px;
+    height: 28px;
+    padding: 0 7px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-btn, 8px);
+    border: 1px solid var(--border-subtle);
+    background: var(--surface);
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.12s ease;
+}
+
+.ewip-pg-btn:hover:not(:disabled):not(.is-active) {
+    background: var(--surface-hover);
+    border-color: var(--border-strong);
+}
+
+.ewip-pg-btn.is-active {
+    background: var(--accent-main);
+    color: var(--accent-on);
+    border-color: var(--accent-main);
+    box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.25);
+}
+
+.ewip-pg-btn:disabled {
+    opacity: 0.38;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.ewip-pg-ellipsis {
+    min-width: 22px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+    user-select: none;
+}
+
+.ewip-pg-select,
+.ewip-pg-input {
+    background: var(--surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-btn, 8px);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ewip-pg-select:focus,
+.ewip-pg-input:focus {
+    border-color: var(--accent-main);
+    box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.22);
+}
+
+/* =========================================================
+   FIFO >= 90% THEME-STYLED DUCK PARADE (BOTTOM MARCH)
+   ========================================================= */
+.ewip-duck-parade-stage {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 188px;
+    pointer-events: none;
+    overflow: hidden;
+    z-index: 9998;
+}
+
+.ewip-duck-parade-track {
+    position: absolute;
+    bottom: 6px;
+    left: 0;
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 10px;
+    will-change: transform;
+    animation: ewipDuckMarch 17s linear forwards;
+}
+
+@keyframes ewipDuckMarch {
+    0% {
+        transform: translate3d(-115%, 0, 0);
+    }
+    100% {
+        transform: translate3d(calc(100vw + 130px), 0, 0);
+    }
+}
+
+.ewip-duck-unit {
+    position: relative;
+    display: inline-flex;
+    align-items: flex-end;
+    transform-origin: bottom center;
+    animation: ewipDuckWaddle 0.58s ease-in-out infinite;
+    filter: drop-shadow(0 4px 5px rgba(0, 0, 0, 0.22));
+}
+
+.ewip-duck-unit.is-leader {
+    animation-duration: 0.68s;
+    z-index: 2;
+}
+
+.ewip-duck-unit.is-tiny {
+    animation-duration: 0.44s;
+}
+
+@keyframes ewipDuckWaddle {
+    0%, 100% {
+        transform: translateY(0px) rotate(-3deg);
+    }
+    50% {
+        transform: translateY(-4.5px) rotate(3.2deg);
+    }
+}
+
+.ewip-duck-foot-front {
+    transform-origin: 48px 72px;
+    animation: ewipFootStepA 0.58s ease-in-out infinite;
+}
+
+.ewip-duck-foot-back {
+    transform-origin: 36px 72px;
+    animation: ewipFootStepB 0.58s ease-in-out infinite;
+}
+
+.ewip-duck-unit.is-leader .ewip-duck-foot-front,
+.ewip-duck-unit.is-leader .ewip-duck-foot-back {
+    animation-duration: 0.68s;
+}
+
+.ewip-duck-unit.is-tiny .ewip-duck-foot-front,
+.ewip-duck-unit.is-tiny .ewip-duck-foot-back {
+    animation-duration: 0.44s;
+}
+
+@keyframes ewipFootStepA {
+    0%, 100% { transform: rotate(-16deg) translateY(0px); }
+    50% { transform: rotate(18deg) translateY(-2px); }
+}
+
+@keyframes ewipFootStepB {
+    0%, 100% { transform: rotate(18deg) translateY(-2px); }
+    50% { transform: rotate(-16deg) translateY(0px); }
+}
+
+.ewip-duck-leader-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: flex-end;
+    padding-top: 84px;
+}
+
+.ewip-duck-sign-rig {
+    position: absolute;
+    bottom: 28px;
+    left: 64px;
+    width: 0;
+    overflow: visible;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    transform-origin: bottom center;
+    animation: ewipSignSway 0.68s ease-in-out infinite;
+}
+
+@keyframes ewipSignSway {
+    0%, 100% { transform: rotate(-2.4deg) translateY(0px); }
+    50% { transform: rotate(2.4deg) translateY(-2px); }
+}
+
+.ewip-duck-signboard {
+    position: relative;
+    padding: 6px 13px;
+    white-space: nowrap;
+    font-family: var(--font-display, 'Plus Jakarta Sans', sans-serif);
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+    line-height: 1.2;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 8px 18px -6px rgba(0, 0, 0, 0.35);
+}
+
+.ewip-duck-sign-pct {
+    font-family: var(--font-mono, 'JetBrains Mono', monospace);
+    font-variant-numeric: tabular-nums;
+    font-weight: 900;
+}
+
+.ewip-duck-pole {
+    width: 6px;
+    height: 48px;
+    border-radius: 3px;
+    margin-top: -1px;
+    box-shadow: inset -1px 0 2px rgba(0, 0, 0, 0.28);
+}
+
+.ewip-duck-pole-finial {
+    width: 11px;
+    height: 11px;
+    border-radius: 9999px;
+    margin-bottom: -4px;
+    z-index: 2;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .animate-shine, .animate-pulse {
         animation: none !important;
     }
     .ewip-fifo-daily-scroll {
         scroll-behavior: auto;
+    }
+    .ewip-duck-unit,
+    .ewip-duck-foot-front,
+    .ewip-duck-foot-back,
+    .ewip-duck-sign-rig {
+        animation: none !important;
     }
     ::view-transition-old(root),
     ::view-transition-new(root),
@@ -466,3 +715,4 @@ body.ewip-app #rocket-table-body td:nth-child(7) {
         transition: none !important;
     }
 }
+
