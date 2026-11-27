@@ -695,6 +695,58 @@ body.ewip-app #rocket-table-body td:nth-child(7) {
     z-index: 2;
 }
 
+/* =========================================================
+   REALTIME SYNC: OVERVIEW COUNTING & MODAL ROW FADE-OUT
+   ========================================================= */
+.ewip-num-up,
+.ewip-num-down {
+    display: inline-block;
+    transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), filter 0.24s ease;
+    will-change: transform;
+}
+
+.ewip-num-up {
+    transform: scale(1.07);
+    filter: drop-shadow(0 0 8px rgba(16, 185, 129, 0.35));
+}
+
+.ewip-num-down {
+    transform: scale(0.95);
+    filter: drop-shadow(0 0 8px rgba(244, 63, 94, 0.32));
+}
+
+tr.ewip-row-fading-out {
+    opacity: 0 !important;
+    transform: translateX(10px);
+    background-color: rgba(248, 113, 113, 0.14) !important;
+    pointer-events: none;
+    transition: opacity 0.36s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.36s cubic-bezier(0.4, 0, 0.2, 1),
+                background-color 0.25s ease !important;
+}
+
+tr.ewip-row-fading-out > td {
+    opacity: 0;
+    transition: opacity 0.32s ease;
+}
+
+@keyframes ewipRowFadeIn {
+    0% {
+        opacity: 0;
+        transform: translateY(-4px);
+        background-color: rgba(16, 185, 129, 0.14);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+        background-color: transparent;
+    }
+}
+
+tr.ewip-row-fade-in {
+    animation: ewipRowFadeIn 0.42s ease-out both;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .animate-shine, .animate-pulse {
         animation: none !important;
@@ -705,8 +757,16 @@ body.ewip-app #rocket-table-body td:nth-child(7) {
     .ewip-duck-unit,
     .ewip-duck-foot-front,
     .ewip-duck-foot-back,
-    .ewip-duck-sign-rig {
+    .ewip-duck-sign-rig,
+    tr.ewip-row-fade-in {
         animation: none !important;
+    }
+    .ewip-num-up,
+    .ewip-num-down,
+    tr.ewip-row-fading-out,
+    tr.ewip-row-fading-out > td {
+        transition: none !important;
+        transform: none !important;
     }
     ::view-transition-old(root),
     ::view-transition-new(root),

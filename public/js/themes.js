@@ -5,7 +5,7 @@
 
 (function () {
     const STORAGE_KEY = 'ewip_active_theme';
-    const DEFAULT_THEME_ID = 'royal-batik';
+    const DEFAULT_THEME_ID = 'macos-glass';
 
     const EWIP_THEMES = {
         'default': {

@@ -19,10 +19,17 @@ const lastKnownRunIds = {};
 const realtimeUnsubscribers = [];
 const realtimeSyncTimers = {};
 const realtimePendingKeys = new Set();
+const realtimePendingMeta = {};
 let realtimeUiRefreshTimer = null;
 let lastRealtimeToastAt = 0;
+let lastRealtimeToastMsg = '';
 let lastConsolidatedSyncAt = 0;
 let isApplyingRealtimeSync = false;
+window.activeDrilldownContext = null;
+window.activeShDetailModalId = null;
+window.activePaylaterDetailModalId = null;
+let drilldownRefreshSeq = 0;
+let shDetailRefreshSeq = 0;
 
 function initFirebaseEngine() {
     if (isFirebaseActive && db) return true;
@@ -88,7 +95,71 @@ async function ensureFirebaseSDKLoaded() {
 // Attempt immediate initialization if primary CDN script already loaded
 initFirebaseEngine();
 
-async function saveDB(key, data, progressCb) {
+const REALTIME_KEY_LABELS = {
+    consolidated_master: 'Database Master diperbarui',
+    uploaded_master_files: 'Database Master diperbarui',
+    uploaded_wip_files: 'Data WIP Harian diperbarui',
+    stwc_settings: 'Konfigurasi STWC diperbarui',
+    sh_materials: 'Data SH diperbarui',
+    daily_history: 'Data Trend FIFO Daily diperbarui',
+    assy_paylater: 'Data Paylater diperbarui',
+    assy_rocket: 'Data Assy Rocket diperbarui',
+    global_cutoff_key: 'Batas Cut-Off Periode diperbarui',
+    global_delay_key: 'Batas Zona Delay diperbarui',
+    master_headers: 'Struktur Header Master diperbarui',
+    last_wip_date: 'Tanggal Sync WIP diperbarui'
+};
+
+function getDefaultChangeLabelForKey(key) {
+    if (REALTIME_KEY_LABELS[key]) return REALTIME_KEY_LABELS[key];
+    if (String(key).startsWith('wip_file_')) return 'Data WIP Harian diperbarui';
+    if (String(key).startsWith('master_file_')) return 'Database Master diperbarui';
+    return 'Data diperbarui';
+}
+
+function getActiveActorName() {
+    try {
+        if (typeof activeUserPin !== 'undefined' && activeUserPin && typeof AUTH_PROFILES !== 'undefined' && AUTH_PROFILES[activeUserPin]) {
+            return AUTH_PROFILES[activeUserPin];
+        }
+    } catch (e) {}
+    return null;
+}
+
+function buildRealtimeToastMessage(changedKeys, metaMap) {
+    if (!Array.isArray(changedKeys) || changedKeys.length === 0) {
+        return 'Data diperbarui secara realtime.';
+    }
+    const keySet = new Set(changedKeys);
+    const hasPrimaryWip = keySet.has('uploaded_wip_files') || keySet.has('consolidated_master');
+    const hasPrimaryMaster = keySet.has('uploaded_master_files');
+    const hasPrimaryDomain = keySet.has('sh_materials') || keySet.has('assy_paylater') || keySet.has('assy_rocket') || keySet.has('stwc_settings') || keySet.has('global_cutoff_key') || keySet.has('global_delay_key');
+
+    const effectiveKeys = changedKeys.filter(k => {
+        if (k === 'last_wip_date' && hasPrimaryWip) return false;
+        if (k === 'daily_history' && (hasPrimaryWip || hasPrimaryDomain)) return false;
+        if (k === 'master_headers' && (hasPrimaryMaster || hasPrimaryWip)) return false;
+        if (k === 'consolidated_master' && keySet.has('uploaded_wip_files')) return false;
+        return true;
+    });
+
+    const finalKeys = effectiveKeys.length > 0 ? effectiveKeys : changedKeys;
+    const labels = [];
+    let actor = null;
+
+    finalKeys.forEach(k => {
+        const info = metaMap && metaMap[k] ? metaMap[k] : null;
+        const lbl = (info && info.label) ? info.label : getDefaultChangeLabelForKey(k);
+        if (lbl && !labels.includes(lbl)) labels.push(lbl);
+        if (!actor && info && info.actor) actor = info.actor;
+    });
+
+    const summary = labels.length > 0 ? labels.slice(0, 3).join(' • ') : 'Data diperbarui';
+    const actorSuffix = actor ? ` (${actor})` : '';
+    return `Sync Realtime: ${summary}${actorSuffix}`;
+}
+
+async function saveDB(key, data, progressCb, changeLabel = null) {
     if (!isFirebaseActive) return;
     try { 
         const serializedData = JSON.stringify(data); 
@@ -126,6 +197,9 @@ async function saveDB(key, data, progressCb) {
         // Catat runId lokal sebelum menulis meta agar listener snapshot lokal mengabaikan write sendiri
         lastKnownRunIds[key] = runId;
 
+        const resolvedLabel = changeLabel || getDefaultChangeLabelForKey(key);
+        const actorName = getActiveActorName();
+
         let retriesMetaEnd = 3;
         while(retriesMetaEnd > 0) {
             try {
@@ -133,6 +207,8 @@ async function saveDB(key, data, progressCb) {
                     chunks: chunksCount,
                     runId: runId,
                     updatedBy: CLIENT_INSTANCE_ID,
+                    updatedByName: actorName,
+                    changeLabel: resolvedLabel,
                     updatedAt: Date.now()
                 });
                 break;
@@ -198,11 +274,40 @@ const REALTIME_SYNC_KEYS = [
     'last_wip_date'
 ];
 
+function refreshOpenModalsOnRealtimeSync(changedKeys) {
+    try {
+        const drillModal = document.getElementById('drilldown-modal');
+        if (drillModal && !drillModal.classList.contains('hidden') && window.activeDrilldownContext && typeof window.openAdvancedDrilldown === 'function') {
+            const ctx = window.activeDrilldownContext;
+            window.openAdvancedDrilldown(ctx.mode, ctx.param1, ctx.param2, { isRealtime: true });
+        }
+    } catch (e) { console.warn('Realtime drilldown refresh warning:', e); }
+
+    try {
+        if (typeof window.refreshOpenShDetailModalRealtime === 'function') {
+            window.refreshOpenShDetailModalRealtime();
+        }
+    } catch (e) { console.warn('Realtime SH modal refresh warning:', e); }
+
+    try {
+        if (typeof window.refreshOpenPaylaterDetailModalRealtime === 'function') {
+            window.refreshOpenPaylaterDetailModalRealtime();
+        }
+    } catch (e) { console.warn('Realtime Paylater modal refresh warning:', e); }
+}
+
 function scheduleRealtimeUiRefresh() {
     if (realtimeUiRefreshTimer) clearTimeout(realtimeUiRefreshTimer);
     realtimeUiRefreshTimer = setTimeout(() => {
         realtimeUiRefreshTimer = null;
         const changedKeys = Array.from(realtimePendingKeys);
+        const changedMeta = {};
+        changedKeys.forEach(k => {
+            if (realtimePendingMeta[k]) {
+                changedMeta[k] = realtimePendingMeta[k];
+                delete realtimePendingMeta[k];
+            }
+        });
         realtimePendingKeys.clear();
         if (changedKeys.length === 0) return;
 
@@ -242,14 +347,21 @@ function scheduleRealtimeUiRefresh() {
                 renderRocketTable();
             }
 
+            // Sinkronkan modal list yang sedang terbuka (dengan animasi memudar untuk Assy yang tidak lagi terdampak)
+            refreshOpenModalsOnRealtimeSync(changedKeys);
+
             if (window.lucide) window.lucide.createIcons();
 
             const overlay = document.getElementById('loading-overlay');
             const isOverlayVisible = overlay && !overlay.classList.contains('hidden');
             const now = Date.now();
-            if (!isOverlayVisible && now - lastRealtimeToastAt > 4500 && typeof showToast === 'function') {
+            const toastMsg = buildRealtimeToastMessage(changedKeys, changedMeta);
+            const isDuplicateBurst = toastMsg === lastRealtimeToastMsg && (now - lastRealtimeToastAt < 3500);
+            const isTooFrequent = (now - lastRealtimeToastAt < 1000);
+            if (!isOverlayVisible && !isDuplicateBurst && !isTooFrequent && typeof showToast === 'function') {
                 lastRealtimeToastAt = now;
-                showToast('Data diperbarui secara realtime.', 'info');
+                lastRealtimeToastMsg = toastMsg;
+                showToast(toastMsg, 'info');
             }
         } catch(err) {
             console.warn('Realtime UI refresh error:', err);
@@ -341,6 +453,10 @@ function initRealtimeSyncListeners() {
             if (meta.runId && lastKnownRunIds[key] === meta.runId) return;
 
             lastKnownRunIds[key] = meta.runId || ('remote_' + Date.now());
+            realtimePendingMeta[key] = {
+                label: meta.changeLabel || getDefaultChangeLabelForKey(key),
+                actor: meta.updatedByName || null
+            };
             if (realtimeSyncTimers[key]) clearTimeout(realtimeSyncTimers[key]);
             realtimeSyncTimers[key] = setTimeout(() => {
                 delete realtimeSyncTimers[key];
@@ -893,7 +1009,7 @@ window.saveBatchRemarks = async function() {
         }
 
         setLoaderState('Menyimpan Batch Remarks...', 'Menyinkronkan ke Cloud Database', 80, `${updatedCount} material`);
-        await saveDB('sh_materials', globalShMaterials);
+        await saveDB('sh_materials', globalShMaterials, null, 'Remark SH diperbarui');
         setLoaderState('Menyimpan Batch Remarks...', 'Selesai', 100, 'Complete');
 
         renderShMaterials();
@@ -1453,13 +1569,123 @@ const safeSetHTML = (id, htmlContent) => { const el = document.getElementById(id
 const safeSetText = (id, textContent) => { const el = document.getElementById(id); if (el) el.innerText = textContent; };
 function preventD(e) { e.preventDefault(); e.stopPropagation(); }
 
+function escapeHtmlAttr(val) {
+    return String(val === undefined || val === null ? '' : val)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function prefersReducedMotion() {
+    try {
+        return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    } catch (e) {
+        return false;
+    }
+}
+
+// ==========================================
+// OVERVIEW SMOOTH COUNTING ANIMATION ENGINE
+// ==========================================
+const overviewPrevNumbers = new Map();
+const overviewActiveRafs = new Map();
+const overviewPulseTimers = new Map();
+
+function formatCountNumber(val, opts = {}) {
+    const decimals = opts.decimals || 0;
+    const prefix = opts.prefix || '';
+    const suffix = opts.suffix || '';
+    const useLocale = opts.useLocale !== false;
+    const num = Number(val);
+    const safeNum = Number.isFinite(num) ? num : 0;
+    let body;
+    if (decimals > 0) {
+        body = useLocale
+            ? safeNum.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+            : safeNum.toFixed(decimals);
+    } else {
+        const rounded = Math.round(safeNum);
+        body = useLocale ? rounded.toLocaleString() : String(rounded);
+    }
+    return `${prefix}${body}${suffix}`;
+}
+
+function getInitialCountDisplay(cacheKey, targetVal, opts = {}) {
+    const prevVal = overviewPrevNumbers.has(cacheKey) ? overviewPrevNumbers.get(cacheKey) : targetVal;
+    return formatCountNumber(prevVal, opts);
+}
+
+function animateOverviewNumber(target, newVal, opts = {}) {
+    const el = typeof target === 'string' ? document.getElementById(target) : target;
+    const cacheKey = opts.key || (typeof target === 'string' ? target : (el && (el.dataset.countKey || el.id)));
+    const targetNum = Number(newVal);
+    const safeTarget = Number.isFinite(targetNum) ? targetNum : 0;
+
+    if (!el || !cacheKey) {
+        if (el) el.innerText = formatCountNumber(safeTarget, opts);
+        return;
+    }
+
+    const hadPrev = overviewPrevNumbers.has(cacheKey);
+    const prevNum = hadPrev ? overviewPrevNumbers.get(cacheKey) : safeTarget;
+    overviewPrevNumbers.set(cacheKey, safeTarget);
+
+    if (overviewActiveRafs.has(cacheKey)) {
+        cancelAnimationFrame(overviewActiveRafs.get(cacheKey));
+        overviewActiveRafs.delete(cacheKey);
+    }
+
+    if (!hadPrev || prevNum === safeTarget || prefersReducedMotion()) {
+        el.innerText = formatCountNumber(safeTarget, opts);
+        return;
+    }
+
+    const duration = opts.duration || 680;
+    const startTime = performance.now();
+    const diff = safeTarget - prevNum;
+    const dirClass = diff > 0 ? 'ewip-num-up' : 'ewip-num-down';
+
+    el.classList.remove('ewip-num-up', 'ewip-num-down');
+    el.classList.add(dirClass);
+    if (overviewPulseTimers.has(cacheKey)) {
+        clearTimeout(overviewPulseTimers.get(cacheKey));
+        overviewPulseTimers.delete(cacheKey);
+    }
+
+    const step = (now) => {
+        if (!el.isConnected) {
+            overviewActiveRafs.delete(cacheKey);
+            return;
+        }
+        const progress = Math.min((now - startTime) / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        const currentVal = prevNum + diff * eased;
+        el.innerText = formatCountNumber(progress >= 1 ? safeTarget : currentVal, opts);
+
+        if (progress < 1) {
+            overviewActiveRafs.set(cacheKey, requestAnimationFrame(step));
+        } else {
+            overviewActiveRafs.delete(cacheKey);
+            const tId = setTimeout(() => {
+                el.classList.remove('ewip-num-up', 'ewip-num-down');
+                overviewPulseTimers.delete(cacheKey);
+            }, 180);
+            overviewPulseTimers.set(cacheKey, tId);
+        }
+    };
+
+    overviewActiveRafs.set(cacheKey, requestAnimationFrame(step));
+}
+
 function showToast(message, type = 'info') {
     const container = document.getElementById('toast-container'); 
     if(!container) return;
     const toast = document.createElement('div'); toast.className = `toast ${type}`;
-    toast.innerHTML = `<div class="flex items-center gap-2"><i data-lucide="${type === 'success' ? 'check-circle' : 'info'}" class="w-4 h-4"></i>${message}</div>`;
+    const iconName = type === 'success' ? 'check-circle' : (type === 'warning' ? 'alert-triangle' : (type === 'error' ? 'x-circle' : 'refresh-cw'));
+    toast.innerHTML = `<div class="flex items-center gap-2"><i data-lucide="${iconName}" class="w-4 h-4 shrink-0"></i><span>${message}</span></div>`;
     container.appendChild(toast); lucide.createIcons(); setTimeout(() => toast.classList.add('show'), 10);
-    setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 4000);
+    setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 4500);
 }
 
 function sanitizeHeaders(headersArray) {
@@ -2090,7 +2316,7 @@ window.confirmBatchSh = async function() {
     });
 
     await executeSilentCRUD(async () => {
-        await saveDB('sh_materials', globalShMaterials);
+        await saveDB('sh_materials', globalShMaterials, null, 'Data SH (Batch) ditambahkan');
     }, "Batch Shortage Berhasil Disimpan!", btn);
     closeBatchShModal();
 };
@@ -2161,7 +2387,7 @@ window.executeBatchConfirm = async function() {
     let btn = document.getElementById('btn-save-bc');
 
     await executeSilentCRUD(async () => {
-        await saveDB('sh_materials', globalShMaterials);
+        await saveDB('sh_materials', globalShMaterials, null, 'Kedatangan Material SH dikonfirmasi');
     }, `${updatedCount} Material berhasil di-Closed (Arrived)!`, btn);
     closeBatchConfirmModal();
 };
@@ -2216,7 +2442,7 @@ window.refreshAllOpenShImpact = async function() {
                 }
             }
         });
-        await saveDB('sh_materials', globalShMaterials);
+        await saveDB('sh_materials', globalShMaterials, null, 'List Assy terdampak SH disinkronkan');
     }, `Sinkronisasi Massal ${updated} SH Berhasil!`, null);
 };
 
@@ -2351,7 +2577,7 @@ window.onload = async function() {
 
     if (lastWipDate && lastWipDate !== wipCycleStr && globalWipData.length > 0) {
         globalWipData = []; uploadedWipFiles = [];
-        await saveDB('uploaded_wip_files', []);
+        await saveDB('uploaded_wip_files', [], null, 'Report WIP Harian direset otomatis (07:00)');
         await saveDB('last_wip_date', null);
         safeSetText('info-last-sync', '-');
         showToast("Siklus 07:00 pagi dimulai! Report WIP kemarin telah direset otomatis.", "warning");
@@ -2390,7 +2616,7 @@ function initDailyWipResetWatcher() {
                 uploadedWipFiles = [];
                 try {
                     if (isFirebaseActive) {
-                        await saveDB('uploaded_wip_files', []);
+                        await saveDB('uploaded_wip_files', [], null, 'Report WIP Harian direset otomatis (07:00)');
                         await saveDB('last_wip_date', null);
                     }
                 } catch (e) {}
@@ -2512,7 +2738,7 @@ async function resetMasterData() {
     if(confirm("Hapus SELURUH Master Data MPP dari Server? Tindakan ini tidak dapat dibatalkan.")) {
         globalMasterData = []; masterHeaders = []; activePeriodeTab = 'ALL'; uploadedMasterFiles = []; masterHeadersSet.clear();
         try {
-            await saveDB('master_headers', []); await saveDB('uploaded_master_files', []);
+            await saveDB('master_headers', []); await saveDB('uploaded_master_files', [], null, 'Database Master dikosongkan');
             safeSetText('info-master-count', '0 Assy');
             showToast('Database Master telah dikosongkan.', 'success');
             try { setupControlHeaders(); } catch(e){} renderUploadedFiles(); renderOverviewDashboard();
@@ -2524,7 +2750,7 @@ async function resetWipData() {
     if(confirm("Hapus Data WIP Harian dari Server? Ini akan mengosongkan matriks Resume Analisis.")) {
         globalWipData = []; uploadedWipFiles = [];
         try {
-            await saveDB('last_wip_date', null); await saveDB('uploaded_wip_files', []);
+            await saveDB('last_wip_date', null); await saveDB('uploaded_wip_files', [], null, 'Data WIP Harian dikosongkan');
             await saveDB('last_wip_consolidate', null);
             safeSetText('info-last-sync', '-');
             updateWipDependencies(); renderUploadedFiles(); renderOverviewDashboard(); renderReportWIP();
@@ -3407,8 +3633,12 @@ window.exportDrilldownXLSX = function() {
     XLSX.writeFile(wb, `${title}.xlsx`);
 };
 
-window.openAdvancedDrilldown = function(mode, param1, param2) {
+window.openAdvancedDrilldown = function(mode, param1, param2, options = {}) {
     const modal = document.getElementById('drilldown-modal');
+    const isRealtimeUpdate = Boolean(options && options.isRealtime && modal && !modal.classList.contains('hidden'));
+    window.activeDrilldownContext = { mode, param1, param2 };
+    const currentSeq = ++drilldownRefreshSeq;
+
     let filtered = []; let titleStr = "";
 
     let cutoffIndex = globalUniquePeriodeWPP.indexOf(globalCutoffPWKey); 
@@ -3497,6 +3727,8 @@ window.openAdvancedDrilldown = function(mode, param1, param2) {
             let isDelay = wppIndex < delayIndex;
 
             if (param1 === 'SH') return isSH;
+            if (param1 === 'SH_DELAY') return isSH && isDelay;
+            if (param1 === 'SH_ONSCHED') return isSH && !isDelay;
             if (param1 === 'DELAY') return !isSH && isDelay;
             if (param1 === 'ONSCHED') return !isSH && !isDelay;
             return true;
@@ -3520,117 +3752,166 @@ window.openAdvancedDrilldown = function(mode, param1, param2) {
 
     filtered.sort((a,b) => parseIndoDate(a['STWC']) - parseIndoDate(b['STWC']));
 
-    let totalList = filtered.length;
-    let qtyArr = []; let totalCct = 0;
+    const tbodyEl = document.getElementById('drilldown-tbody');
+    const prevUidSet = new Set();
+    const removedRows = [];
+    const nextUidSet = new Set(filtered.map(m => String(m._uid)));
 
-    let html = '';
-    window.currentDrilldownData = [];
-
-    // Update Header for Modal
-    let theadHtml = `<tr><th class="w-20">STATUS</th><th class="text-left w-48">ASSY NO</th><th class="w-24 text-left">WP</th><th class="w-20 text-center">PROBLEM</th><th class="w-24 text-center">STWC</th><th class="w-20 text-center">QTY</th><th class="w-20 text-center text-purple-700">QTY CCT</th><th class="w-20 text-center">TOTAL CCT</th><th class="text-left w-32">ACTIVE SH</th><th class="text-left w-32">RIWAYAT SH</th><th class="text-left">CUSTOMER</th></tr>`;
-    safeSetHTML('drilldown-thead', theadHtml);
-
-    filtered.forEach(m => {
-        let badge = m._status === 'CND 3' ? '<span class="bg-red-500 text-white px-2 py-0.5 rounded font-bold text-[9px] shadow-sm">CND 3</span>' : 
-                    m._status === 'CND 2' ? '<span class="bg-amber-500 text-white px-2 py-0.5 rounded font-bold text-[9px] shadow-sm">CND 2</span>' :
-                    (m._status === 'CLOSED' ? '<span class="bg-emerald-500 text-white px-2 py-0.5 rounded font-bold text-[9px] shadow-sm">CLOSED</span>' : '<span class="bg-blue-500 text-white px-2 py-0.5 rounded font-bold text-[9px] shadow-sm">CND 1</span>');
-        
-        let w = wipMap.get(m._uid);
-        
-        let qtyDisplay = parseFloat(m['QTY'] || 0);
-        let qtyCctDisplay = parseFloat(m['CCT'] || m['QTY CCT'] || 0);
-        let cctDisplay = w && w['PP CCT'] ? parseFloat(w['PP CCT']) : parseFloat(m['TOTAL CCT'] || 0);
-        let problemBadge = window.getShBadgeHtml(m._uid, m.ASSY);
-        
-        totalCct += cctDisplay; if(qtyDisplay > 0) qtyArr.push(qtyDisplay);
-
-        let activeShNames = [];
-        let riwayatShNames = [];
-        globalShMaterials.forEach(sh => {
-            if (sh.targetUids && sh.targetUids.includes(m._uid)) {
-                if (sh.tanggalKedatangan === null) activeShNames.push(sh.partName);
-                else riwayatShNames.push(sh.partName);
+    if (isRealtimeUpdate && tbodyEl) {
+        tbodyEl.querySelectorAll('tr.drill-row[data-uid]').forEach(tr => {
+            const uid = tr.getAttribute('data-uid');
+            if (uid !== null) {
+                prevUidSet.add(uid);
+                if (!nextUidSet.has(uid)) {
+                    removedRows.push(tr);
+                }
             }
         });
-        
-        let activeShStr = activeShNames.join(', ') || '-';
-        let riwayatShStr = riwayatShNames.join(', ') || '-';
+    }
 
-        window.currentDrilldownData.push({
-            "STATUS": m._status,
-            "ASSY NO": m.ASSY || '-',
-            "WP": m.WP || '-',
-            "STWC": m.STWC || '-',
-            "QTY": qtyDisplay,
-            "QTY CCT": qtyCctDisplay,
-            "TOTAL CCT": cctDisplay,
-            "ACTIVE SH": activeShStr,
-            "RIWAYAT SH": riwayatShStr,
-            "CUSTOMER": m.CUSTOMER || '-'
+    const buildAndCommitDrilldown = () => {
+        if (currentSeq !== drilldownRefreshSeq) return;
+        if (isRealtimeUpdate && (!modal || modal.classList.contains('hidden'))) return;
+
+        let totalList = filtered.length;
+        let qtyArr = []; let totalCct = 0;
+
+        let html = '';
+        window.currentDrilldownData = [];
+
+        filtered.forEach(m => {
+            let badge = m._status === 'CND 3' ? '<span class="bg-red-500 text-white px-2 py-0.5 rounded font-bold text-[9px] shadow-sm">CND 3</span>' : 
+                        m._status === 'CND 2' ? '<span class="bg-amber-500 text-white px-2 py-0.5 rounded font-bold text-[9px] shadow-sm">CND 2</span>' :
+                        (m._status === 'CLOSED' ? '<span class="bg-emerald-500 text-white px-2 py-0.5 rounded font-bold text-[9px] shadow-sm">CLOSED</span>' : '<span class="bg-blue-500 text-white px-2 py-0.5 rounded font-bold text-[9px] shadow-sm">CND 1</span>');
+            
+            let w = wipMap.get(m._uid);
+            
+            let qtyDisplay = parseFloat(m['QTY'] || 0);
+            let qtyCctDisplay = parseFloat(m['CCT'] || m['QTY CCT'] || 0);
+            let cctDisplay = w && w['PP CCT'] ? parseFloat(w['PP CCT']) : parseFloat(m['TOTAL CCT'] || 0);
+            let problemBadge = window.getShBadgeHtml(m._uid, m.ASSY);
+            
+            totalCct += cctDisplay; if(qtyDisplay > 0) qtyArr.push(qtyDisplay);
+
+            let activeShNames = [];
+            let riwayatShNames = [];
+            globalShMaterials.forEach(sh => {
+                if (sh.targetUids && sh.targetUids.includes(m._uid)) {
+                    if (sh.tanggalKedatangan === null) activeShNames.push(sh.partName);
+                    else riwayatShNames.push(sh.partName);
+                }
+            });
+            
+            let activeShStr = activeShNames.join(', ') || '-';
+            let riwayatShStr = riwayatShNames.join(', ') || '-';
+
+            window.currentDrilldownData.push({
+                "STATUS": m._status,
+                "ASSY NO": m.ASSY || '-',
+                "WP": m.WP || '-',
+                "STWC": m.STWC || '-',
+                "QTY": qtyDisplay,
+                "QTY CCT": qtyCctDisplay,
+                "TOTAL CCT": cctDisplay,
+                "ACTIVE SH": activeShStr,
+                "RIWAYAT SH": riwayatShStr,
+                "CUSTOMER": m.CUSTOMER || '-'
+            });
+
+            const uidStr = String(m._uid);
+            const fadeInCls = (isRealtimeUpdate && prevUidSet.size > 0 && !prevUidSet.has(uidStr)) ? ' ewip-row-fade-in' : '';
+            html += `<tr data-uid="${escapeHtmlAttr(uidStr)}" class="border-b border-gray-100 hover:bg-gray-50 transition drill-row${fadeInCls}"><td class="p-2.5 text-center stat-cell">${badge}</td><td class="p-2.5 font-bold text-gray-800 assy-cell">${m.ASSY||'-'}</td><td class="p-2.5 font-mono text-gray-500 wp-cell">${m.WP||'-'}</td><td class="p-2.5 text-center">${problemBadge}</td><td class="p-2.5 text-center font-bold">${m.STWC||'-'}</td><td class="p-2.5 text-center text-indigo-700 font-bold">${qtyDisplay}</td><td class="p-2.5 text-center text-purple-600 font-bold">${qtyCctDisplay}</td><td class="p-2.5 text-center font-bold text-gray-800 bg-gray-50/50">${cctDisplay}</td><td class="p-2.5 text-left text-[9px] text-red-600 font-bold max-w-[150px] truncate" title="${activeShStr}">${activeShStr}</td><td class="p-2.5 text-left text-[9px] text-emerald-600 font-bold max-w-[150px] truncate" title="${riwayatShStr}">${riwayatShStr}</td><td class="p-2.5 text-gray-600 truncate max-w-[200px] cust-cell">${m.CUSTOMER||'-'}</td></tr>`;
         });
+        
+        if(filtered.length === 0) html = '<tr><td colspan="11" class="text-center p-6 text-gray-400 font-medium">Tidak ada data aktif.</td></tr>';
+        
+        if (mode === 'SINGLE' && filtered.length > 0) {
+             let m = filtered[0];
+             let today = new Date(); today.setHours(0,0,0,0);
+             let stwcTime = parseIndoDate(m['STWC']);
+             let overdueText = "";
+             
+             if(m._status !== 'CLOSED' && stwcTime > 0) {
+                 let diffDays = Math.round((today.getTime() - stwcTime) / 86400000);
+                 if(diffDays > 0) overdueText = `<span class="bg-red-100 text-red-700 px-2 py-0.5 rounded ml-2 text-xs font-bold shadow-sm animate-pulse">⚠️ Terlambat ${diffDays} Hari dari STWC</span>`;
+                 else overdueText = `<span class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded ml-2 text-xs font-bold shadow-sm">⏳ On Schedule (Aman)</span>`;
+             } else if(m._status === 'CLOSED') {
+                 overdueText = `<span class="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded ml-2 text-xs font-bold shadow-sm">✅ Telah Selesai (Closed)</span>`;
+             }
+             safeSetHTML('drilldown-subtitle', `Periode: <strong class="text-gray-800">${m.PERIODE||'-'}</strong> &nbsp;|&nbsp; WPP: <strong class="text-gray-800">${getWPP(m.WP||'-')}</strong> ${overdueText}`);
+        } else {
+             let avgQty = getAvgQtyOutlierEliminated(qtyArr);
+             safeSetHTML('drilldown-subtitle', `Total List: <strong class="text-gray-800">${totalList}</strong> &nbsp;|&nbsp; Total QTY Aktual: <strong class="text-indigo-700">${qtyArr.reduce((a,b)=>a+b,0).toLocaleString()}</strong> &nbsp;|&nbsp; Rata-rata QTY (Normalisasi): <strong class="text-indigo-700">${avgQty.toLocaleString()}</strong>`);
+        }
+        
+        safeSetText('drilldown-title', titleStr);
+        safeSetHTML('drilldown-tbody', html);
 
-        html += `<tr class="border-b border-gray-100 hover:bg-gray-50 transition drill-row"><td class="p-2.5 text-center stat-cell">${badge}</td><td class="p-2.5 font-bold text-gray-800 assy-cell">${m.ASSY||'-'}</td><td class="p-2.5 font-mono text-gray-500 wp-cell">${m.WP||'-'}</td><td class="p-2.5 text-center">${problemBadge}</td><td class="p-2.5 text-center font-bold">${m.STWC||'-'}</td><td class="p-2.5 text-center text-indigo-700 font-bold">${qtyDisplay}</td><td class="p-2.5 text-center text-purple-600 font-bold">${qtyCctDisplay}</td><td class="p-2.5 text-center font-bold text-gray-800 bg-gray-50/50">${cctDisplay}</td><td class="p-2.5 text-left text-[9px] text-red-600 font-bold max-w-[150px] truncate" title="${activeShStr}">${activeShStr}</td><td class="p-2.5 text-left text-[9px] text-emerald-600 font-bold max-w-[150px] truncate" title="${riwayatShStr}">${riwayatShStr}</td><td class="p-2.5 text-gray-600 truncate max-w-[200px] cust-cell">${m.CUSTOMER||'-'}</td></tr>`;
-    });
-    
-    if(filtered.length === 0) html = '<tr><td colspan="11" class="text-center p-6 text-gray-400 font-medium">Tidak ada data aktif.</td></tr>';
-    
-    if (mode === 'SINGLE' && filtered.length > 0) {
-         let m = filtered[0];
-         let today = new Date(); today.setHours(0,0,0,0);
-         let stwcTime = parseIndoDate(m['STWC']);
-         let overdueText = "";
-         
-         if(m._status !== 'CLOSED' && stwcTime > 0) {
-             let diffDays = Math.round((today.getTime() - stwcTime) / 86400000);
-             if(diffDays > 0) overdueText = `<span class="bg-red-100 text-red-700 px-2 py-0.5 rounded ml-2 text-xs font-bold shadow-sm animate-pulse">⚠️ Terlambat ${diffDays} Hari dari STWC</span>`;
-             else overdueText = `<span class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded ml-2 text-xs font-bold shadow-sm">⏳ On Schedule (Aman)</span>`;
-         } else if(m._status === 'CLOSED') {
-             overdueText = `<span class="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded ml-2 text-xs font-bold shadow-sm">✅ Telah Selesai (Closed)</span>`;
-         }
-         safeSetHTML('drilldown-subtitle', `Periode: <strong class="text-gray-800">${m.PERIODE||'-'}</strong> &nbsp;|&nbsp; WPP: <strong class="text-gray-800">${getWPP(m.WP||'-')}</strong> ${overdueText}`);
+        if (!isRealtimeUpdate) {
+            let theadHtml = `<tr><th class="w-20">STATUS</th><th class="text-left w-48">ASSY NO</th><th class="w-24 text-left">WP</th><th class="w-20 text-center">PROBLEM</th><th class="w-24 text-center">STWC</th><th class="w-20 text-center">QTY</th><th class="w-20 text-center text-purple-700">QTY CCT</th><th class="w-20 text-center">TOTAL CCT</th><th class="text-left w-32">ACTIVE SH</th><th class="text-left w-32">RIWAYAT SH</th><th class="text-left">CUSTOMER</th></tr>`;
+            safeSetHTML('drilldown-thead', theadHtml);
+
+            const thead = document.querySelector('#drilldown-modal thead');
+            if(thead) {
+                const oldFilterRow = thead.querySelector('.modal-filter-row');
+                if(oldFilterRow) oldFilterRow.remove();
+
+                let filterRow = document.createElement('tr');
+                filterRow.className = 'modal-filter-row bg-gray-50 border-t border-gray-200';
+                filterRow.innerHTML = `
+                    <th class="p-1"><input type="text" data-col-idx="0" placeholder="Filter..." class="w-full text-[9px] border px-1.5 py-1 rounded font-normal outline-none focus:border-brand-500" onkeyup="applyAllDrillTableFilters()"></th>
+                    <th class="p-1"><input type="text" data-col-idx="1" placeholder="Cari Assy..." class="w-full text-[9px] border px-1.5 py-1 rounded font-normal outline-none focus:border-brand-500" onkeyup="applyAllDrillTableFilters()"></th>
+                    <th class="p-1"><input type="text" data-col-idx="2" placeholder="Cari WP..." class="w-full text-[9px] border px-1.5 py-1 rounded font-normal outline-none focus:border-brand-500" onkeyup="applyAllDrillTableFilters()"></th>
+                    <th></th><th></th><th></th><th></th><th></th>
+                    <th class="p-1"><input type="text" data-col-idx="8" placeholder="Cari Active SH..." class="w-full text-[9px] border px-1.5 py-1 rounded font-normal outline-none focus:border-brand-500" onkeyup="applyAllDrillTableFilters()"></th>
+                    <th class="p-1"><input type="text" data-col-idx="9" placeholder="Cari Riwayat..." class="w-full text-[9px] border px-1.5 py-1 rounded font-normal outline-none focus:border-brand-500" onkeyup="applyAllDrillTableFilters()"></th>
+                    <th class="p-1"><input type="text" data-col-idx="10" placeholder="Cari Customer..." class="w-full text-[9px] border px-1.5 py-1 rounded font-normal outline-none focus:border-brand-500" onkeyup="applyAllDrillTableFilters()"></th>
+                `;
+                thead.appendChild(filterRow);
+            }
+            if(modal) modal.classList.remove('hidden');
+        } else {
+            window.applyAllDrillTableFilters();
+        }
+    };
+
+    if (isRealtimeUpdate && removedRows.length > 0 && !prefersReducedMotion()) {
+        removedRows.forEach(tr => tr.classList.add('ewip-row-fading-out'));
+        setTimeout(buildAndCommitDrilldown, 380);
     } else {
-         let avgQty = getAvgQtyOutlierEliminated(qtyArr);
-         safeSetHTML('drilldown-subtitle', `Total List: <strong class="text-gray-800">${totalList}</strong> &nbsp;|&nbsp; Total QTY Aktual: <strong class="text-indigo-700">${qtyArr.reduce((a,b)=>a+b,0).toLocaleString()}</strong> &nbsp;|&nbsp; Rata-rata QTY (Normalisasi): <strong class="text-indigo-700">${avgQty.toLocaleString()}</strong>`);
+        buildAndCommitDrilldown();
     }
-    
-    safeSetText('drilldown-title', titleStr);
-    safeSetHTML('drilldown-tbody', html);
-
-    const thead = document.querySelector('#drilldown-modal thead');
-    if(thead) {
-        const oldFilterRow = thead.querySelector('.modal-filter-row');
-        if(oldFilterRow) oldFilterRow.remove();
-
-        let filterRow = document.createElement('tr');
-        filterRow.className = 'modal-filter-row bg-gray-50 border-t border-gray-200';
-        filterRow.innerHTML = `
-            <th class="p-1"><input type="text" placeholder="Filter..." class="w-full text-[9px] border px-1.5 py-1 rounded font-normal outline-none focus:border-brand-500" onkeyup="filterDrillTable(0, this.value)"></th>
-            <th class="p-1"><input type="text" placeholder="Cari Assy..." class="w-full text-[9px] border px-1.5 py-1 rounded font-normal outline-none focus:border-brand-500" onkeyup="filterDrillTable(1, this.value)"></th>
-            <th class="p-1"><input type="text" placeholder="Cari WP..." class="w-full text-[9px] border px-1.5 py-1 rounded font-normal outline-none focus:border-brand-500" onkeyup="filterDrillTable(2, this.value)"></th>
-            <th></th><th></th><th></th><th></th><th></th>
-            <th class="p-1"><input type="text" placeholder="Cari Active SH..." class="w-full text-[9px] border px-1.5 py-1 rounded font-normal outline-none focus:border-brand-500" onkeyup="filterDrillTable(8, this.value)"></th>
-            <th class="p-1"><input type="text" placeholder="Cari Riwayat..." class="w-full text-[9px] border px-1.5 py-1 rounded font-normal outline-none focus:border-brand-500" onkeyup="filterDrillTable(9, this.value)"></th>
-            <th class="p-1"><input type="text" placeholder="Cari Customer..." class="w-full text-[9px] border px-1.5 py-1 rounded font-normal outline-none focus:border-brand-500" onkeyup="filterDrillTable(10, this.value)"></th>
-        `;
-        thead.appendChild(filterRow);
-    }
-
-    if(modal) modal.classList.remove('hidden');
 }
 
-window.filterDrillTable = function(colIdx, val) {
-    let filter = val.toUpperCase();
-    let rows = document.querySelectorAll('.drill-row');
-    rows.forEach(r => {
-        let cell = r.getElementsByTagName('td')[colIdx];
-        if(cell) {
-            let txt = cell.textContent || cell.innerText;
-            r.style.display = txt.toUpperCase().indexOf(filter) > -1 ? "" : "none";
-        }
+window.applyAllDrillTableFilters = function() {
+    const filterInputs = document.querySelectorAll('#drilldown-modal .modal-filter-row input[data-col-idx]');
+    const activeFilters = [];
+    filterInputs.forEach(inp => {
+        const val = (inp.value || '').trim().toUpperCase();
+        if (val) activeFilters.push({ colIdx: parseInt(inp.getAttribute('data-col-idx'), 10), val });
     });
+    const rows = document.querySelectorAll('#drilldown-tbody .drill-row');
+    rows.forEach(r => {
+        let visible = true;
+        for (let i = 0; i < activeFilters.length; i++) {
+            const cell = r.getElementsByTagName('td')[activeFilters[i].colIdx];
+            const txt = cell ? (cell.textContent || cell.innerText || '').toUpperCase() : '';
+            if (txt.indexOf(activeFilters[i].val) === -1) {
+                visible = false;
+                break;
+            }
+        }
+        r.style.display = visible ? '' : 'none';
+    });
+};
+
+window.filterDrillTable = function(colIdx, val) {
+    window.applyAllDrillTableFilters();
 }
 
 window.closeDrilldown = function() {
+    window.activeDrilldownContext = null;
+    drilldownRefreshSeq++;
     const modal = document.getElementById('drilldown-modal');
     if(modal) modal.classList.add('hidden');
 }
@@ -3763,11 +4044,11 @@ function renderOverviewDashboard() {
     // Perbaikan Bug: Hitung status CND 1 (yang dulunya OPEN)
     let tOpen = activeMasterData.filter(m => m._status === 'CND 1').length;
     
-    safeSetText('ov-master-total', tMaster.toLocaleString());
-    safeSetText('ov-master-cnd3', tCnd3.toLocaleString());
-    safeSetText('ov-master-cnd2', tCnd2.toLocaleString());
-    safeSetText('ov-master-closed', tClosed.toLocaleString());
-    safeSetText('ov-master-onsched', tOpen.toLocaleString());
+    animateOverviewNumber('ov-master-total', tMaster);
+    animateOverviewNumber('ov-master-cnd3', tCnd3);
+    animateOverviewNumber('ov-master-cnd2', tCnd2);
+    animateOverviewNumber('ov-master-closed', tClosed);
+    animateOverviewNumber('ov-master-onsched', tOpen);
 
     let todayStr = getTodayDateStr();
     let closedToday = activeMasterData.filter(m => m._status === 'CLOSED' && m._closedDate === todayStr);
@@ -3826,7 +4107,7 @@ function renderOverviewDashboard() {
 
     let wipMap = new Map(); globalWipData.forEach(w => wipMap.set(w._uid, w));
 
-    safeSetText('ov-closed-today-count', closedToday.length.toString());
+    animateOverviewNumber('ov-closed-today-count', closedToday.length, { useLocale: false });
     const listEl = document.getElementById('overview-closed-list');
     if(listEl) {
         if(closedToday.length === 0) listEl.innerHTML = `<div class="text-center ewip-panel-sub text-[10px] mt-4 font-medium">Belum ada Assy yang selesai hari ini.</div>`;
@@ -3854,7 +4135,7 @@ function renderOverviewDashboard() {
         }
     }
 
-    safeSetText('ov-overdue-list-count', overdueList.length.toString());
+    animateOverviewNumber('ov-overdue-list-count', overdueList.length, { useLocale: false });
     const listOverdueEl = document.getElementById('overview-overdue-list');
     if(listOverdueEl) {
         if(overdueList.length === 0) listOverdueEl.innerHTML = `<div class="text-center ewip-panel-sub text-[10px] mt-4 font-medium">Tidak ada Assy yang overdue.</div>`;
@@ -3888,7 +4169,7 @@ function renderOverviewDashboard() {
     const shListContainer = document.getElementById('overview-sh-list');
     if(shListContainer) {
         let activeShCount = globalShMaterials.filter(sh => !sh.tanggalKedatangan).length;
-        safeSetText('ov-sh-list-count', activeShCount.toString() + ' Aktif');
+        animateOverviewNumber('ov-sh-list-count', activeShCount, { useLocale: false, suffix: ' Aktif' });
         
         if(globalShMaterials.length === 0) {
             shListContainer.innerHTML = `<div class="text-center ewip-panel-sub text-[10px] mt-4 font-medium">Belum ada riwayat SH.</div>`;
@@ -4194,13 +4475,16 @@ function renderOverviewDashboard() {
         window.renderTrendFifoDaily(isApplyingRealtimeSync);
     }
 
-    if(globalWipData.length === 0) return;
+    animateOverviewNumber('ov-kpi-load', kpiTotalLoad);
+    animateOverviewNumber('ov-kpi-sh', kpiSH);
+    animateOverviewNumber('ov-kpi-paylater', kpiPaylater);
+    animateOverviewNumber('ov-kpi-delay', kpiDelay);
+    animateOverviewNumber('ov-kpi-onsched', kpiOnSched);
 
-    safeSetText('ov-kpi-load', kpiTotalLoad.toLocaleString());
-    safeSetText('ov-kpi-sh', kpiSH.toLocaleString());
-    safeSetText('ov-kpi-paylater', kpiPaylater.toLocaleString());
-    safeSetText('ov-kpi-delay', kpiDelay.toLocaleString());
-    safeSetText('ov-kpi-onsched', kpiOnSched.toLocaleString());
+    if(globalWipData.length === 0) {
+        safeSetHTML('overview-charts-container', '');
+        return;
+    }
 
     // Menyimpan stat untuk tombol Copy Report Text
     let fifoValue = kpiTotalLoad > 0 ? ((kpiTotalLoad - kpiDelay) / kpiTotalLoad * 100).toFixed(2) : 0;
@@ -4224,6 +4508,21 @@ function renderOverviewDashboard() {
         let pctDelay = t > 0 ? Math.round((stats.delay/t)*100) : 0; 
         let pctSched = t > 0 ? Math.round((stats.onsched/t)*100) : 0; 
         let pctSh = t > 0 ? Math.round((stats.sh/t)*100) : 0;
+
+        const cKey = (metric) => `chart-${chartId}-${metric}`;
+        const chartCounters = [
+            { key: cKey('total'), val: t },
+            { key: cKey('onsched'), val: stats.onsched },
+            { key: cKey('sh-onsched'), val: stats.sh_onsched, prefix: 'SH: ' },
+            { key: cKey('cnt-onsched'), val: stats.count_onsched || 0, useLocale: false },
+            { key: cKey('avg-onsched'), val: stats.avg_onsched || 0, useLocale: false },
+            { key: cKey('pct-sched'), val: pctSched, useLocale: false, suffix: '%' },
+            { key: cKey('delay'), val: stats.delay },
+            { key: cKey('sh-delay'), val: stats.sh_delay, prefix: 'SH: ' },
+            { key: cKey('cnt-delay'), val: stats.count_delay || 0, useLocale: false },
+            { key: cKey('avg-delay'), val: stats.avg_delay || 0, useLocale: false },
+            { key: cKey('pct-delay'), val: pctDelay, useLocale: false, suffix: '%' }
+        ];
         
         let html = `
         <div class="bento-box flex flex-col w-full mt-2 overflow-hidden">
@@ -4232,7 +4531,7 @@ function renderOverviewDashboard() {
                     <h2 class="font-batik-display font-bold ${ui.chartTitle} text-sm flex items-center gap-2 tracking-wide"><i data-lucide="bar-chart-2" class="w-4 h-4 ewip-accent-icon"></i> ${titleText}</h2>
                     <p class="text-[10px] ${ui.chartSub} mt-0.5">${ct.legendCaption}</p>
                 </div>
-                <div class="text-right text-[10px] font-bold ${ui.chartTotalBox} uppercase tracking-widest border px-3 py-1.5 rounded-md shadow-inner">Total Load: <span class="font-mono tabular-nums text-sm ${ui.chartTotalVal} font-black ml-1">${t.toLocaleString()}</span></div>
+                <div class="text-right text-[10px] font-bold ${ui.chartTotalBox} uppercase tracking-widest border px-3 py-1.5 rounded-md shadow-inner">Total Load: <span data-count-key="${cKey('total')}" class="font-mono tabular-nums text-sm ${ui.chartTotalVal} font-black ml-1">${getInitialCountDisplay(cKey('total'), t)}</span></div>
             </div>
             
             <div class="flex flex-col xl:flex-row flex-1 p-4 lg:p-5 gap-4 lg:gap-6 items-center xl:items-stretch overflow-hidden">
@@ -4250,39 +4549,48 @@ function renderOverviewDashboard() {
                             <div class="flex flex-col flex-1">
                                 <span class="font-batik-display ${ui.legendSchedLabel} uppercase tracking-widest text-[9px] font-bold mb-1">On Schedule</span>
                                 <div class="flex items-center gap-2 mb-1.5">
-                                    <span class="font-mono tabular-nums text-base lg:text-lg ${ui.legendSchedVal} font-black leading-none">${stats.onsched.toLocaleString()}</span>
-                                    <span class="font-mono text-[9px] font-black ${ui.legendSchedSh} px-1.5 py-0.5 rounded border leading-none" title="Porsi Potensi SH">SH: ${stats.sh_onsched.toLocaleString()}</span>
+                                    <span data-count-key="${cKey('onsched')}" class="font-mono tabular-nums text-base lg:text-lg ${ui.legendSchedVal} font-black leading-none">${getInitialCountDisplay(cKey('onsched'), stats.onsched)}</span>
+                                    <span data-count-key="${cKey('sh-onsched')}" class="font-mono text-[9px] font-black ${ui.legendSchedSh} px-1.5 py-0.5 rounded border leading-none" title="Porsi Potensi SH">${getInitialCountDisplay(cKey('sh-onsched'), stats.sh_onsched, { prefix: 'SH: ' })}</span>
                                 </div>
                                 <div class="flex items-center gap-2 text-[9px] font-bold ${ui.legendMeta} font-mono">
-                                    <span>Assy: <strong class="${ui.legendSchedVal}">${stats.count_onsched||0}</strong></span>
+                                    <span>Assy: <strong data-count-key="${cKey('cnt-onsched')}" class="${ui.legendSchedVal}">${getInitialCountDisplay(cKey('cnt-onsched'), stats.count_onsched || 0, { useLocale: false })}</strong></span>
                                     <span class="w-1 h-1 rounded-full bg-current opacity-40"></span>
-                                    <span>Avg: <strong class="${ui.legendSchedVal}">${stats.avg_onsched||0}</strong></span>
+                                    <span>Avg: <strong data-count-key="${cKey('avg-onsched')}" class="${ui.legendSchedVal}">${getInitialCountDisplay(cKey('avg-onsched'), stats.avg_onsched || 0, { useLocale: false })}</strong></span>
                                 </div>
                             </div>
-                            <span class="font-mono tabular-nums ${ui.legendSchedPct} px-2 py-1.5 rounded text-xs font-black border shrink-0 ml-2">${pctSched}%</span>
+                            <span data-count-key="${cKey('pct-sched')}" class="font-mono tabular-nums ${ui.legendSchedPct} px-2 py-1.5 rounded text-xs font-black border shrink-0 ml-2">${getInitialCountDisplay(cKey('pct-sched'), pctSched, { useLocale: false, suffix: '%' })}</span>
                         </div>
                         
                         <div class="flex justify-between items-center ${ui.legendDelayCard} px-3 py-2.5 rounded-lg shadow-sm border transition cursor-pointer" onclick="event.stopPropagation(); openAdvancedDrilldown('PIE_LEGEND', 'DELAY', '${chartId === 'GRAND' ? 'ALL' : chartId}')">
                             <div class="flex flex-col flex-1">
                                 <span class="font-batik-display ${ui.legendDelayLabel} uppercase tracking-widest text-[9px] font-bold mb-1">Delay (Outstanding)</span>
                                 <div class="flex items-center gap-2 mb-1.5">
-                                    <span class="font-mono tabular-nums text-base lg:text-lg ${ui.legendDelayVal} font-black leading-none">${stats.delay.toLocaleString()}</span>
-                                    <span class="font-mono text-[9px] font-black ${ui.legendDelaySh} px-1.5 py-0.5 rounded border leading-none" title="Porsi Delay SH">SH: ${stats.sh_delay.toLocaleString()}</span>
+                                    <span data-count-key="${cKey('delay')}" class="font-mono tabular-nums text-base lg:text-lg ${ui.legendDelayVal} font-black leading-none">${getInitialCountDisplay(cKey('delay'), stats.delay)}</span>
+                                    <span data-count-key="${cKey('sh-delay')}" class="font-mono text-[9px] font-black ${ui.legendDelaySh} px-1.5 py-0.5 rounded border leading-none" title="Porsi Delay SH">${getInitialCountDisplay(cKey('sh-delay'), stats.sh_delay, { prefix: 'SH: ' })}</span>
                                 </div>
                                 <div class="flex items-center gap-2 text-[9px] font-bold ${ui.legendMeta} font-mono">
-                                    <span>Assy: <strong class="${ui.legendDelayVal}">${stats.count_delay||0}</strong></span>
+                                    <span>Assy: <strong data-count-key="${cKey('cnt-delay')}" class="${ui.legendDelayVal}">${getInitialCountDisplay(cKey('cnt-delay'), stats.count_delay || 0, { useLocale: false })}</strong></span>
                                     <span class="w-1 h-1 rounded-full bg-current opacity-40"></span>
-                                    <span>Avg: <strong class="${ui.legendDelayVal}">${stats.avg_delay||0}</strong></span>
+                                    <span>Avg: <strong data-count-key="${cKey('avg-delay')}" class="${ui.legendDelayVal}">${getInitialCountDisplay(cKey('avg-delay'), stats.avg_delay || 0, { useLocale: false })}</strong></span>
                                 </div>
                             </div>
-                            <span class="font-mono tabular-nums ${ui.legendDelayPct} px-2 py-1.5 rounded text-xs font-black border shrink-0 ml-2">${pctDelay}%</span>
+                            <span data-count-key="${cKey('pct-delay')}" class="font-mono tabular-nums ${ui.legendDelayPct} px-2 py-1.5 rounded text-xs font-black border shrink-0 ml-2">${getInitialCountDisplay(cKey('pct-delay'), pctDelay, { useLocale: false, suffix: '%' })}</span>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
         `;
-        if(chartsContainer) chartsContainer.insertAdjacentHTML('beforeend', html);
+        if(chartsContainer) {
+            chartsContainer.insertAdjacentHTML('beforeend', html);
+            const insertedBox = chartsContainer.lastElementChild;
+            if (insertedBox) {
+                chartCounters.forEach(c => {
+                    const el = insertedBox.querySelector(`[data-count-key="${c.key}"]`);
+                    if (el) animateOverviewNumber(el, c.val, { key: c.key, prefix: c.prefix || '', suffix: c.suffix || '', useLocale: c.useLocale !== false });
+                });
+            }
+        }
         lucide.createIcons();
 
         const sCfg = ct.series;
@@ -5787,7 +6095,7 @@ window.confirmSaveSh = async function() {
         setLoaderState('Mengunci Shortage...', 'Menyimpan relasi UID Assy', 0, '');
         document.getElementById('loading-overlay').classList.remove('hidden');
         
-        await saveDB('sh_materials', globalShMaterials, (pct) => setLoaderState('Mengunci Shortage...', 'Upload data Shortage ke Cloud', pct, 'Menyimpan...'));
+        await saveDB('sh_materials', globalShMaterials, (pct) => setLoaderState('Mengunci Shortage...', 'Upload data Shortage ke Cloud', pct, 'Menyimpan...'), 'Data SH diperbarui');
         setLoaderState('Memperbarui UI...', 'Merender Tabel & Dashboard', 99, '');
         await new Promise(r => setTimeout(r, 100));
 
@@ -5862,7 +6170,7 @@ window.saveEditSh = function() {
     showToast("Mengirim Remark ke server di latar belakang...", "warning");
 
     // 3. Kirim ke Firebase di latar belakang (non-blocking, tanpa loading screen)
-    saveDB('sh_materials', globalShMaterials)
+    saveDB('sh_materials', globalShMaterials, null, 'Remark SH diperbarui')
         .then(() => {
             refreshShViews();
             showToast("Remark SH tersinkron ke server!", "success");
@@ -5873,64 +6181,97 @@ window.saveEditSh = function() {
         });
 };
 
-window.renderShImpactDetails = function(id) {
+window.renderShImpactDetails = function(id, options = {}) {
     let sh = globalShMaterials.find(x => x.id === id);
-    let container = document.getElementById('sh-impact-container');
+    let container = document.getElementById('sh-impact-container') || document.getElementById('sh-impact-table-wrap');
     if(!sh || !container) return;
-    
-    container.innerHTML = `<div class="text-center p-6 text-xs font-bold text-indigo-500 flex flex-col items-center justify-center gap-3"><i data-lucide="loader-2" class="w-6 h-6 animate-spin"></i> Memuat data...</div>`;
-    lucide.createIcons();
-    
-    setTimeout(() => {
-        if(sh.targetUids && sh.targetUids.length > 0) {
-            let assyList = [];
+
+    const buildTableHtml = () => {
+        let assyList = [];
+        if (sh.targetUids && sh.targetUids.length > 0) {
             sh.targetUids.forEach(uid => {
                 let m = globalMasterData.find(x => x._uid === uid);
                 if(m) assyList.push(m);
             });
-            assyList.sort((a,b) => parseIndoDate(a.STWC) - parseIndoDate(b.STWC));
-            
-            let html = `
-            <div class="max-h-60 overflow-y-auto border border-gray-200 rounded-lg shadow-sm w-full animate-[fadeIn_0.3s_ease-out]">
-                <table class="w-full text-[10px] text-left whitespace-nowrap">
-                    <thead class="bg-gray-100 sticky top-0 shadow-sm z-10">
-                        <tr>
-                            <th class="p-2 border-b border-gray-200">Periode</th>
-                            <th class="p-2 border-b border-gray-200">Assy No</th>
-                            <th class="p-2 border-b border-gray-200">WP</th>
-                            <th class="p-2 border-b border-gray-200 text-center">STWC</th>
-                            <th class="p-2 border-b border-gray-200 text-center">USAGE</th>
-                            <th class="p-2 border-b border-gray-200 text-right">QTY DB</th>
-                            <th class="p-2 border-b border-gray-200 text-right">NEED MATERIAL</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-gray-100">`;
-            
-            assyList.forEach(m => {
-                let cleanA = superCleanAssy(m.ASSY);
-                let usage = (sh.assyUsageMap && sh.assyUsageMap[cleanA]) ? sh.assyUsageMap[cleanA] : 1;
-                let qtyDisplay = parseFloat(m.QTY || 0);
-                let needMat = qtyDisplay * usage;
-                html += `
-                        <tr class="hover:bg-indigo-50 transition-colors">
-                            <td class="p-2 font-bold text-gray-700">${m.PERIODE||'-'}</td>
-                            <td class="p-2 font-black text-gray-900">${m.ASSY||'-'}</td>
-                            <td class="p-2 font-mono text-gray-500">${m.WP||'-'}</td>
-                            <td class="p-2 text-center font-bold text-gray-700">${m.STWC||'-'}</td>
-                            <td class="p-2 text-center font-bold text-pink-600">${usage}</td>
-                            <td class="p-2 text-right font-bold text-indigo-600">${qtyDisplay}</td>
-                            <td class="p-2 text-right font-black text-pink-700">${needMat.toLocaleString()}</td>
-                        </tr>`;
-            });
-            html += `</tbody></table></div>`;
-            container.outerHTML = html;
         }
+        assyList.sort((a,b) => parseIndoDate(a.STWC) - parseIndoDate(b.STWC));
+
+        if (assyList.length === 0) {
+            return `
+            <div id="sh-impact-table-wrap" class="border border-gray-200 rounded-xl p-6 bg-gray-50 text-center flex flex-col items-center justify-center gap-2">
+                <i data-lucide="box-select" class="w-6 h-6 text-gray-400"></i>
+                <h4 class="text-xs font-black text-gray-700">0 Assy Aktif Terdampak</h4>
+                <p class="text-[10px] text-gray-500 italic px-4">Tidak ada lagi Assy aktif yang terdampak shortage ini.</p>
+            </div>`;
+        }
+
+        const prevUidSet = options && options.prevUidSet ? options.prevUidSet : null;
+        let html = `
+        <div id="sh-impact-table-wrap" class="max-h-60 overflow-y-auto border border-gray-200 rounded-lg shadow-sm w-full ${options && options.instant ? '' : 'animate-[fadeIn_0.3s_ease-out]'}">
+            <table class="w-full text-[10px] text-left whitespace-nowrap">
+                <thead class="bg-gray-100 sticky top-0 shadow-sm z-10">
+                    <tr>
+                        <th class="p-2 border-b border-gray-200">Periode</th>
+                        <th class="p-2 border-b border-gray-200">Assy No</th>
+                        <th class="p-2 border-b border-gray-200">WP</th>
+                        <th class="p-2 border-b border-gray-200 text-center">STWC</th>
+                        <th class="p-2 border-b border-gray-200 text-center">USAGE</th>
+                        <th class="p-2 border-b border-gray-200 text-right">QTY DB</th>
+                        <th class="p-2 border-b border-gray-200 text-right">NEED MATERIAL</th>
+                    </tr>
+                </thead>
+                <tbody id="sh-impact-tbody" class="divide-y divide-gray-100">`;
+
+        assyList.forEach(m => {
+            let cleanA = superCleanAssy(m.ASSY);
+            let usage = (sh.assyUsageMap && sh.assyUsageMap[cleanA]) ? sh.assyUsageMap[cleanA] : 1;
+            let qtyDisplay = parseFloat(m.QTY || 0);
+            let needMat = qtyDisplay * usage;
+            const uidStr = String(m._uid);
+            const fadeInCls = (prevUidSet && prevUidSet.size > 0 && !prevUidSet.has(uidStr)) ? ' ewip-row-fade-in' : '';
+            html += `
+                    <tr data-uid="${escapeHtmlAttr(uidStr)}" class="hover:bg-indigo-50 transition-colors${fadeInCls}">
+                        <td class="p-2 font-bold text-gray-700">${m.PERIODE||'-'}</td>
+                        <td class="p-2 font-black text-gray-900">${m.ASSY||'-'}</td>
+                        <td class="p-2 font-mono text-gray-500">${m.WP||'-'}</td>
+                        <td class="p-2 text-center font-bold text-gray-700">${m.STWC||'-'}</td>
+                        <td class="p-2 text-center font-bold text-pink-600">${usage}</td>
+                        <td class="p-2 text-right font-bold text-indigo-600">${qtyDisplay}</td>
+                        <td class="p-2 text-right font-black text-pink-700">${needMat.toLocaleString()}</td>
+                    </tr>`;
+        });
+        html += `</tbody></table></div>`;
+        return html;
+    };
+
+    if (options && options.instant) {
+        container.outerHTML = buildTableHtml();
+        if (window.lucide) window.lucide.createIcons();
+        return;
+    }
+
+    container.innerHTML = `<div class="text-center p-6 text-xs font-bold text-indigo-500 flex flex-col items-center justify-center gap-3"><i data-lucide="loader-2" class="w-6 h-6 animate-spin"></i> Memuat data...</div>`;
+    lucide.createIcons();
+
+    setTimeout(() => {
+        const liveContainer = document.getElementById('sh-impact-container') || document.getElementById('sh-impact-table-wrap');
+        if (!liveContainer) return;
+        liveContainer.outerHTML = buildTableHtml();
+        if (window.lucide) window.lucide.createIcons();
     }, 50);
 };
 
-window.openShDetailModal = function(id) {
+window.openShDetailModal = function(id, options = {}) {
     let sh = globalShMaterials.find(x => x.id === id);
     if(!sh) return;
+
+    window.activeShDetailModalId = id;
+
+    let savedDraft = '';
+    if (options && options.preserveInput) {
+        const existingInp = document.getElementById('sh-reply-input');
+        if (existingInp) savedDraft = existingInp.value || '';
+    }
     
     let isArrived = sh.tanggalKedatangan !== null;
     let statusBadge = isArrived ? `<span class="bg-emerald-100 text-emerald-700 px-2 py-1 rounded font-black border border-emerald-200">ARRIVED (${sh.tanggalKedatangan})</span>` : `<span class="bg-red-100 text-red-600 px-2 py-1 rounded font-black border border-red-200 animate-pulse">OPEN</span>`;
@@ -5955,7 +6296,7 @@ window.openShDetailModal = function(id) {
         </div>`;
     } else {
         impactDetailsHtml = `
-        <div class="border border-gray-200 rounded-xl p-6 bg-gray-50 text-center flex flex-col items-center justify-center gap-2">
+        <div id="sh-impact-container" class="border border-gray-200 rounded-xl p-6 bg-gray-50 text-center flex flex-col items-center justify-center gap-2">
             <i data-lucide="box-select" class="w-6 h-6 text-gray-400"></i>
             <h4 class="text-xs font-black text-gray-700">0 Assy Aktif Terdampak</h4>
             <p class="text-[10px] text-gray-500 italic px-4">Sistem mengawasi <strong>${requestedCount}</strong> Assy. Jika part tersebut dirilis di periode selanjutnya, statusnya akan otomatis menjadi SH.</p>
@@ -6077,11 +6418,71 @@ window.openShDetailModal = function(id) {
         </div>
     `;
     document.getElementById('sh-detail-content').innerHTML = html;
+    if (savedDraft) {
+        const restoredInp = document.getElementById('sh-reply-input');
+        if (restoredInp) restoredInp.value = savedDraft;
+    }
+    if (options && options.autoExpandImpact && assyCount > 0) {
+        window.renderShImpactDetails(sh.id, { instant: true, prevUidSet: options.prevUidSet || null });
+    }
     lucide.createIcons();
     document.getElementById('sh-detail-modal').classList.remove('hidden');
     setTimeout(() => { let cb = document.getElementById('sh-detail-chat-box'); if(cb) cb.scrollTop = cb.scrollHeight; }, 50);
 }
-window.closeShDetailModal = function() { document.getElementById('sh-detail-modal').classList.add('hidden'); }
+
+window.refreshOpenShDetailModalRealtime = function() {
+    const modal = document.getElementById('sh-detail-modal');
+    const id = window.activeShDetailModalId;
+    if (!modal || modal.classList.contains('hidden') || id === null || id === undefined) return;
+
+    const currentSeq = ++shDetailRefreshSeq;
+    const sh = globalShMaterials.find(x => x.id === id);
+    if (!sh) {
+        window.closeShDetailModal();
+        return;
+    }
+
+    const impactTbody = document.getElementById('sh-impact-tbody');
+    if (impactTbody) {
+        const nextUidSet = new Set();
+        if (Array.isArray(sh.targetUids)) {
+            sh.targetUids.forEach(uid => {
+                if (globalMasterData.some(m => m._uid === uid)) nextUidSet.add(String(uid));
+            });
+        }
+        const prevUidSet = new Set();
+        const removedRows = [];
+        impactTbody.querySelectorAll('tr[data-uid]').forEach(tr => {
+            const uid = tr.getAttribute('data-uid');
+            if (uid !== null) {
+                prevUidSet.add(uid);
+                if (!nextUidSet.has(uid)) removedRows.push(tr);
+            }
+        });
+
+        const commitRefresh = () => {
+            if (currentSeq !== shDetailRefreshSeq) return;
+            if (!modal || modal.classList.contains('hidden') || window.activeShDetailModalId !== id) return;
+            window.openShDetailModal(id, { preserveInput: true, autoExpandImpact: true, prevUidSet });
+        };
+
+        if (removedRows.length > 0 && !prefersReducedMotion()) {
+            removedRows.forEach(tr => tr.classList.add('ewip-row-fading-out'));
+            setTimeout(commitRefresh, 380);
+            return;
+        }
+        commitRefresh();
+        return;
+    }
+
+    window.openShDetailModal(id, { preserveInput: true });
+};
+
+window.closeShDetailModal = function() {
+    window.activeShDetailModalId = null;
+    shDetailRefreshSeq++;
+    document.getElementById('sh-detail-modal').classList.add('hidden');
+}
 
 window.openAddAssyShModal = function(id) {
     let sh = globalShMaterials.find(x => x.id === id);
@@ -6224,7 +6625,7 @@ window.executeDeleteSh = async function(id) {
         setLoaderState('Menghapus...', 'Update Database Cloud', 50, 'Anti Quota-Exceeded');
         document.getElementById('loading-overlay').classList.remove('hidden');
         
-        await saveDB('sh_materials', globalShMaterials);
+        await saveDB('sh_materials', globalShMaterials, null, 'Data SH dihapus');
         
         renderShMaterials();
         if(!document.getElementById('view-overview').classList.contains('hidden')) renderOverviewDashboard();
@@ -6244,7 +6645,7 @@ window.updateKonfirmasiMCL = async function(id, val) {
     let item = globalShMaterials.find(x => String(x.id) === String(id));
     if (item) {
         item.konfirmasiMcl = val;
-        await saveDB('sh_materials', globalShMaterials);
+        await saveDB('sh_materials', globalShMaterials, null, 'Konfirmasi MCL SH diperbarui');
         showToast("Konfirmasi MCL diperbarui", "success");
     }
 };
@@ -6296,7 +6697,7 @@ window.sendShReply = async function(id) {
         inputEl.disabled = true;
 
         try {
-            await saveDB('sh_materials', globalShMaterials);
+            await saveDB('sh_materials', globalShMaterials, null, 'Catatan/Interaksi SH diperbarui');
             openShDetailModal(id);
             renderShMaterials();
         } catch(e) {
@@ -6320,7 +6721,7 @@ window.confirmArrival = async function(id) {
             globalShMaterials[shIndex].picClosed = activeUserPin ? AUTH_PROFILES[activeUserPin] : 'Sistem';
 
             await executeSilentCRUD(async () => {
-                await saveDB('sh_materials', globalShMaterials);
+                await saveDB('sh_materials', globalShMaterials, null, 'Kedatangan Material SH dikonfirmasi');
             }, "Kedatangan Material Berhasil Dikonfirmasi!", null);
             
             closeShDetailModal();
@@ -6394,7 +6795,7 @@ window.refreshShImpact = async function(id) {
         globalShMaterials[shIndex].totalNeedMaterial = newNeed;
         
         await executeSilentCRUD(async () => {
-            await saveDB('sh_materials', globalShMaterials);
+            await saveDB('sh_materials', globalShMaterials, null, 'List Assy terdampak SH diperbarui');
         }, "Data Assy Terdampak berhasil disinkronisasi paksa!", null);
         
         openShDetailModal(id); // Muat ulang modal
@@ -6450,7 +6851,7 @@ window.refreshAllOpenShImpact = async function() {
                 }
             }
         });
-        await saveDB('sh_materials', globalShMaterials);
+        await saveDB('sh_materials', globalShMaterials, null, 'List Assy terdampak SH disinkronkan');
     }, `Sinkronisasi Massal ${updated} SH Berhasil!`, null);
 };
 
@@ -6760,7 +7161,7 @@ window.saveRocketData = async function() {
         }
     });
 
-    await saveDB('assy_rocket', globalAssyRocket, (pct) => setLoaderState('Menyimpan...', 'Upload Rocket ke Cloud', pct, 'Tahap 1 dari 2'));
+    await saveDB('assy_rocket', globalAssyRocket, (pct) => setLoaderState('Menyimpan...', 'Upload Rocket ke Cloud', pct, 'Tahap 1 dari 2'), 'Data Assy Rocket diperbarui');
     await recalculateValidation(true); 
     renderRocketTable();
     closeRocketModal();
@@ -6774,7 +7175,7 @@ window.executeDeleteRocket = async function(id) {
     globalAssyRocket = globalAssyRocket.filter(r => String(r.id) !== String(id));
     setLoaderState('Menghapus...', 'Update Database Cloud', 50, '');
     document.getElementById('loading-overlay').classList.remove('hidden');
-    await saveDB('assy_rocket', globalAssyRocket);
+    await saveDB('assy_rocket', globalAssyRocket, null, 'Data Assy Rocket dihapus');
     renderRocketTable();
     if(!document.getElementById('view-overview').classList.contains('hidden')) renderOverviewDashboard();
     if(!document.getElementById('view-control').classList.contains('hidden')) renderControlOutstanding();
@@ -6959,7 +7360,7 @@ window.savePaylaterData = async function() {
             });
         }
     });
-    await saveDB('assy_paylater', globalAssyPaylater, (pct) => setLoaderState('Menyimpan...', 'Upload ke Cloud', pct, 'Tahap 1 dari 1'));
+    await saveDB('assy_paylater', globalAssyPaylater, (pct) => setLoaderState('Menyimpan...', 'Upload ke Cloud', pct, 'Tahap 1 dari 1'), 'Data Paylater ditambahkan');
     renderPaylaterTable(); closePaylaterModal();
     if(!document.getElementById('view-overview').classList.contains('hidden')) renderOverviewDashboard();
     if(!document.getElementById('view-control').classList.contains('hidden')) renderControlOutstanding();
@@ -7145,7 +7546,7 @@ window.saveBatchDorong = async function() {
             if(r._tempRemarks) existing.remarks = (existing.remarks || '') + " | " + r._tempRemarks;
         }
     });
-    await saveDB('assy_paylater', globalAssyPaylater, (pct) => setLoaderState('Menyimpan...', 'Upload ke Cloud', pct, 'Tahap 1 dari 1'));
+    await saveDB('assy_paylater', globalAssyPaylater, (pct) => setLoaderState('Menyimpan...', 'Upload ke Cloud', pct, 'Tahap 1 dari 1'), 'Status Dorong Paylater diperbarui');
     
     await recalculateValidation(true);
     renderPaylaterTable(); 
@@ -7158,9 +7559,16 @@ window.saveBatchDorong = async function() {
     showToast('Batch Dorong berhasil ditetapkan!', 'success');
 };
 
-window.openPaylaterDetailModal = function(id) {
+window.openPaylaterDetailModal = function(id, options = {}) {
     let py = globalAssyPaylater.find(x => String(x.id) === String(id));
     if(!py) return;
+
+    window.activePaylaterDetailModalId = String(id);
+    let savedDraft = '';
+    if (options && options.preserveInput) {
+        const existingInp = document.getElementById('py-reply-input');
+        if (existingInp) savedDraft = existingInp.value || '';
+    }
 
     let mMatch = globalMasterData.find(m => m._uid === py.uid);
     let dispAssy = mMatch ? mMatch.ASSY : py.assy;
@@ -7262,11 +7670,29 @@ window.openPaylaterDetailModal = function(id) {
         </div>
     `;
     document.getElementById('paylater-detail-content').innerHTML = html;
+    if (savedDraft) {
+        const restoredInp = document.getElementById('py-reply-input');
+        if (restoredInp) restoredInp.value = savedDraft;
+    }
     lucide.createIcons();
     document.getElementById('paylater-detail-modal').classList.remove('hidden');
     setTimeout(() => { let cb = document.getElementById('py-detail-chat-box'); if(cb) cb.scrollTop = cb.scrollHeight; }, 50);
 }
-window.closePaylaterDetailModal = function() { document.getElementById('paylater-detail-modal').classList.add('hidden'); }
+window.refreshOpenPaylaterDetailModalRealtime = function() {
+    const modal = document.getElementById('paylater-detail-modal');
+    const id = window.activePaylaterDetailModalId;
+    if (!modal || modal.classList.contains('hidden') || !id) return;
+    const py = globalAssyPaylater.find(x => String(x.id) === String(id));
+    if (!py) {
+        window.closePaylaterDetailModal();
+        return;
+    }
+    window.openPaylaterDetailModal(id, { preserveInput: true });
+};
+window.closePaylaterDetailModal = function() {
+    window.activePaylaterDetailModalId = null;
+    document.getElementById('paylater-detail-modal').classList.add('hidden');
+}
 
 window.sendPaylaterReply = async function(id) {
     let inputEl = document.getElementById('py-reply-input');
@@ -7314,7 +7740,7 @@ window.sendPaylaterReply = async function(id) {
         inputEl.disabled = true;
 
         try {
-            await saveDB('assy_paylater', globalAssyPaylater);
+            await saveDB('assy_paylater', globalAssyPaylater, null, 'Remark Paylater diperbarui');
             openPaylaterDetailModal(id);
             renderPaylaterTable();
         } catch(e) {
@@ -7333,7 +7759,7 @@ window.executeDorongSingle = async function(id) {
     let dateStr = prompt("Tanggal Aktual Dorong / Serah Terima (YYYY-MM-DD):", getTodayDateStr());
     if(dateStr) {
         item.dorongDate = dateStr; item.dorongBy = activeUserPin ? AUTH_PROFILES[activeUserPin] : 'Sistem';
-        await saveDB('assy_paylater', globalAssyPaylater); renderPaylaterTable();
+        await saveDB('assy_paylater', globalAssyPaylater, null, 'Status Dorong Paylater diperbarui'); renderPaylaterTable();
         if(!document.getElementById('view-overview').classList.contains('hidden')) renderOverviewDashboard();
         if(!document.getElementById('view-control').classList.contains('hidden')) renderControlOutstanding();
         closePaylaterDetailModal();
@@ -7345,7 +7771,7 @@ window.undoDorongSingle = async function(id) {
     if(!item) return;
     if(confirm("Batalkan status Dorong pada Assy ini?")) {
         item.dorongDate = null; item.dorongBy = null;
-        await saveDB('assy_paylater', globalAssyPaylater); renderPaylaterTable();
+        await saveDB('assy_paylater', globalAssyPaylater, null, 'Status Dorong Paylater dibatalkan'); renderPaylaterTable();
         if(!document.getElementById('view-overview').classList.contains('hidden')) renderOverviewDashboard();
         if(!document.getElementById('view-control').classList.contains('hidden')) renderControlOutstanding();
         closePaylaterDetailModal();
@@ -7355,7 +7781,7 @@ window.undoDorongSingle = async function(id) {
 window.executeDeletePaylater = async function(id) {
     if(!confirm("Yakin hapus data riwayat Paylater ini secara permanen?")) return;
     globalAssyPaylater = globalAssyPaylater.filter(x => String(x.id) !== String(id));
-    await saveDB('assy_paylater', globalAssyPaylater); renderPaylaterTable();
+    await saveDB('assy_paylater', globalAssyPaylater, null, 'Data Paylater dihapus'); renderPaylaterTable();
     if(!document.getElementById('view-overview').classList.contains('hidden')) renderOverviewDashboard();
     if(!document.getElementById('view-control').classList.contains('hidden')) renderControlOutstanding();
     closePaylaterDetailModal();
@@ -7861,22 +8287,38 @@ window.renderTrendFifoDaily = function(preserveScroll) {
     ];
 
     let bodyHtml = '';
+    const todayAnimTargets = [];
     metricRows.forEach(row => {
         bodyHtml += `<tr>`;
         bodyHtml += `<td class="ewip-fifo-sticky-col text-left ${row.accentClass}">${row.label}</td>`;
         series.forEach(item => {
             const val = Number(item[row.key] || 0);
             const isZero = val === 0;
-            const displayVal = row.isPct
-                ? (isZero ? '0%' : `${val.toFixed(1)}%`)
-                : val.toLocaleString();
             const todayCls = item.isToday ? ' ewip-fifo-today-col' : '';
             const valCls = isZero ? 'ewip-fifo-zero' : row.accentClass;
-            bodyHtml += `<td class="ewip-fifo-date-col${todayCls} ${valCls}">${displayVal}</td>`;
+            if (item.isToday) {
+                const cKey = `fifo-daily-today-${activeOverviewCat}-${row.key}`;
+                const cOpts = row.isPct
+                    ? { key: cKey, decimals: isZero ? 0 : 1, useLocale: false, suffix: '%' }
+                    : { key: cKey };
+                const initDisp = getInitialCountDisplay(cKey, val, cOpts);
+                todayAnimTargets.push({ key: cKey, val, opts: cOpts });
+                bodyHtml += `<td class="ewip-fifo-date-col${todayCls} ${valCls}"><span data-count-key="${cKey}">${initDisp}</span></td>`;
+            } else {
+                const displayVal = row.isPct
+                    ? (isZero ? '0%' : `${val.toFixed(1)}%`)
+                    : val.toLocaleString();
+                bodyHtml += `<td class="ewip-fifo-date-col${todayCls} ${valCls}">${displayVal}</td>`;
+            }
         });
         bodyHtml += `</tr>`;
     });
     tbody.innerHTML = bodyHtml;
+
+    todayAnimTargets.forEach(t => {
+        const el = tbody.querySelector(`[data-count-key="${t.key}"]`);
+        if (el) animateOverviewNumber(el, t.val, t.opts);
+    });
 
     bindFifoDailyScrollEvents();
 
